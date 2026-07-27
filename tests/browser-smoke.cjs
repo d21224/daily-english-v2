@@ -43,6 +43,37 @@ function silentWav(seconds = 2, sampleRate = 8000) {
   const setupTitle = await page.locator('#setupTitle').textContent();
   if (setupTitle !== '매일영어 설정') throw new Error(`첫 화면이 설정이 아닙니다: ${setupTitle}`);
 
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator('details.fold').first().locator('summary').click();
+  const setupMetrics = await page.evaluate(() => {
+    const style = selector => getComputedStyle(document.querySelector(selector));
+    const listeningLabels = [...document.querySelectorAll('[data-reward="listening"] .deadline-fields label')];
+    const weeklyLabels = [...document.querySelectorAll('[data-reward="weeklyTask"] .deadline-fields label')];
+    return {
+      overflow: document.documentElement.scrollWidth - innerWidth,
+      titleSize: style('.setup-header h1').fontSize,
+      sectionSize: style('.section-head h2').fontSize,
+      detailSize: style('.fold-body h3').fontSize,
+      helperSize: style('.helper').fontSize,
+      inputSize: style('[data-reward-time="listening"]').fontSize,
+      listeningTop: listeningLabels.map(label => label.getBoundingClientRect().top),
+      weeklyTop: weeklyLabels.map(label => label.getBoundingClientRect().top),
+      timeRight: document.querySelector('[data-reward-time="weeklyTask"]').getBoundingClientRect().right,
+      boxRight: document.querySelector('[data-reward="weeklyTask"]').getBoundingClientRect().right
+    };
+  });
+  if (setupMetrics.overflow > 0) throw new Error(`모바일 가로 넘침: ${setupMetrics.overflow}px`);
+  if (setupMetrics.titleSize !== '30px') throw new Error(`설정 제목 크기: ${setupMetrics.titleSize}`);
+  if (setupMetrics.sectionSize !== '16px') throw new Error(`섹션 제목 크기: ${setupMetrics.sectionSize}`);
+  if (setupMetrics.detailSize !== '14px') throw new Error(`세부 제목 크기: ${setupMetrics.detailSize}`);
+  if (setupMetrics.helperSize !== '12px') throw new Error(`도움말 크기: ${setupMetrics.helperSize}`);
+  if (setupMetrics.inputSize !== '14px') throw new Error(`입력값 크기: ${setupMetrics.inputSize}`);
+  if (setupMetrics.listeningTop[0] !== setupMetrics.listeningTop[1]) throw new Error('포인트와 마감시간이 같은 행이 아닙니다.');
+  if (setupMetrics.weeklyTop[1] !== setupMetrics.weeklyTop[2]) throw new Error('주간 마감 요일과 시간이 같은 행이 아닙니다.');
+  if (setupMetrics.timeRight > setupMetrics.boxRight) throw new Error('마감시간이 카드 밖으로 나갑니다.');
+  await page.screenshot({ path:'/tmp/daily-english-v02-mobile-setup.png', fullPage:true });
+  await page.setViewportSize({ width: 820, height: 1180 });
+
   await page.click('#addDailyTask');
   const addedDailyTask = page.locator('[data-daily-task]').first();
   if (await addedDailyTask.inputValue() !== '' || await addedDailyTask.getAttribute('placeholder') !== '과제 이름') throw new Error('매일 과제 추가 입력칸이 빈 placeholder 상태가 아닙니다.');
@@ -70,7 +101,6 @@ function silentWav(seconds = 2, sampleRate = 8000) {
   await page.fill('#dayStart', '0:00');
   await page.fill('#dayEnd', '0:01');
   await page.fill('#dayTarget', '1');
-  await page.locator('details.fold').first().locator('summary').click();
   await page.selectOption('[data-reward-day="weeklyTask"]', '');
   await page.fill('[data-reward-time="weeklyTask"]', '');
   await page.check('input[name="theme"][value="dark"]');
