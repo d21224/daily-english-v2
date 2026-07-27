@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#eaf7ff">
+  <title>매일영어</title>
+  <link rel="icon" href="assets/app-icon-512.png">
+  <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="styles/app.css?v=0.2.2-card-layout-3">
+</head>
+<body data-theme="cloud">
+  <div id="boot" class="boot hidden" role="status" aria-live="polite">
+    <div class="boot-cloud"></div>
+    <strong>학습표를 불러오고 있어요</strong>
+    <span id="bootStage">저장 데이터 확인 중</span>
+  </div>
+
+  <main id="app" class="app hidden">
+    <section id="setupView" class="view setup-view hidden" aria-labelledby="setupTitle">
+      <header class="setup-header">
+        <p class="eyebrow">DAILY ENGLISH · SETTINGS</p>
+        <h1 id="setupTitle">매일영어 설정</h1>
+        <p>날짜별 듣기와 과제를 정해 주세요.</p>
+        <div id="audioStatus" class="status-line"></div>
+      </header>
+
+      <form id="setupForm" novalidate>
+        <section class="setup-section" aria-labelledby="audioHeading">
+          <div class="section-head"><span>1</span><h2 id="audioHeading">오디오</h2></div>
+          <div class="file-row">
+            <div id="audioFileName" class="file-name">선택된 파일 없음</div>
+            <label class="file-button">파일 선택<input id="audioFile" type="file" accept="audio/*,.mp3,.m4a,.wav"></label>
+          </div>
+          <label class="toggle-row"><input id="saveAudio" type="checkbox" checked> 이 기기에 오디오 저장</label>
+          <audio id="setupPlayer" controls preload="metadata"></audio>
+          <p class="helper">브라우저 저장 공간이 비워지면 오디오만 다시 선택해야 할 수 있어요.</p>
+        </section>
+
+        <section class="setup-section" aria-labelledby="dailyHeading">
+          <div class="section-head"><span>2</span><h2 id="dailyHeading">일일 학습</h2></div>
+          <div id="dayTabs" class="day-tabs" role="tablist" aria-label="요일 선택"></div>
+          <div id="dayEditor" class="day-editor"></div>
+        </section>
+
+        <section class="setup-section" aria-labelledby="weeklyHeading">
+          <div class="section-head"><span>3</span><h2 id="weeklyHeading">주간 과제</h2></div>
+          <div id="weeklyTaskEditor" class="task-editor"></div>
+          <button id="addWeeklyTask" class="small-button" type="button">+ 주간 과제 추가</button>
+        </section>
+
+        <p id="setupError" class="error hidden" role="alert"></p>
+        <button class="primary" type="submit">설정 완료 · 아이 학습 화면 열기</button>
+
+        <details class="fold">
+          <summary>포인트·화면 꾸미기</summary>
+          <div class="fold-body">
+            <h3>포인트</h3>
+            <div id="rewardEditor" class="reward-editor"></div>
+            <h3>테마</h3>
+            <div id="themeEditor" class="theme-editor"></div>
+            <h3>화면 문구</h3>
+            <div class="copy-editor">
+              <label>화면 제목<input id="copyTitle" maxlength="80"></label>
+              <label>첫 안내<input id="copyIntro" maxlength="160"></label>
+            </div>
+            <h3>완료 문구</h3>
+            <label>한 줄에 하나씩 입력<textarea id="praiseMessages" rows="10"></textarea></label>
+            <h3>설정 암호</h3>
+            <label>4자리 이상, 비워두면 사용하지 않음<input id="parentPasscode" type="password" minlength="4" autocomplete="new-password"></label>
+          </div>
+        </details>
+
+        <details class="fold">
+          <summary>관리 도구</summary>
+          <div class="fold-body management">
+            <button id="newWeekButton" class="secondary" type="button">새 주 학습 시작</button>
+            <button id="exportBackup" class="secondary" type="button">백업 파일 저장</button>
+            <label class="secondary file-button">백업 파일 불러오기<input id="importBackup" type="file" accept="application/json,.json"></label>
+            <button id="resetApp" class="danger-button" type="button">설정 초기화</button>
+            <p class="version">오디오는 백업 파일에 포함되지 않습니다.</p>
+          </div>
+        </details>
+      </form>
+    </section>
+
+    <section id="childView" class="view child-view hidden" aria-labelledby="childTitle">
+      <header class="child-header">
+        <h1 id="childTitle">매일영어🤍</h1>
+        <p id="childIntro">오늘 할 일부터 하나씩 해보자.</p>
+      </header>
+      <section id="rolloverNotice" class="notice warning hidden"></section>
+      <section id="childAudioNotice" class="notice hidden"></section>
+      <section class="progress-card" aria-labelledby="progressLabel">
+        <div><strong id="progressLabel">이번 주 진행률</strong><span id="progressText">0 / 0 완료</span></div>
+        <progress id="progressBar" value="0" max="1"></progress>
+        <p id="pointTotal"></p>
+      </section>
+      <section id="celebration" class="celebration hidden" aria-live="polite">
+        <img src="assets/cinnamoroll-celebration.webp" alt="">
+        <div><strong>🎉 이번 주도 완주했어요!</strong><p>꾸준히 해낸 너, 정말 멋져!</p></div>
+      </section>
+      <p id="playbackStatus" class="sr-status" aria-live="polite"></p>
+      <section id="learningGrid" class="learning-grid" aria-label="이번 주 학습"></section>
+      <audio id="player" preload="metadata"></audio>
+    </section>
+
+    <section id="fatalView" class="view fatal-view hidden" role="alert">
+      <h1>앗, 화면을 불러오지 못했어요</h1>
+      <p id="fatalMessage">저장된 내용은 그대로 두었어요.</p>
+      <div class="fatal-actions">
+        <button id="retryApp" class="primary" type="button">다시 시도</button>
+        <label class="secondary file-button">백업 불러오기<input id="fatalImport" type="file" accept="application/json,.json"></label>
+        <button id="fatalReset" class="danger-button" type="button">설정 초기화</button>
+      </div>
+    </section>
+    <footer id="appFooter" class="app-footer">
+      <button id="backToSetup" class="footer-settings" type="button">설정 보기</button>
+      <span id="footerDivider" aria-hidden="true">·</span>
+      <span id="footerVersion"></span>
+    </footer>
+  </main>
+
+  <div id="dialogLayer" class="dialog-layer hidden" role="presentation">
+    <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialogTitle">
+      <h2 id="dialogTitle"></h2>
+      <p id="dialogMessage"></p>
+      <div id="dialogField"></div>
+      <p id="dialogError" class="error hidden"></p>
+      <div class="dialog-actions">
+        <button id="dialogCancel" class="secondary" type="button">취소</button>
+        <button id="dialogConfirm" class="primary" type="button">확인</button>
+      </div>
+    </section>
+  </div>
+
+  <script type="module" src="scripts/app.js?v=0.2.2-card-layout-3"></script>
+</body>
+</html>

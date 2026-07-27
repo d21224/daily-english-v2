@@ -1,0 +1,8 @@
+.DS_Store
+*.mp3
+*.json
+!package.json
+!manifest.webmanifest
+*.env
+*.env.*
+*backup*
