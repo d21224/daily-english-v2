@@ -8,7 +8,7 @@
   <link rel="icon" href="assets/app-icon-512.png">
   <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="stylesheet" href="styles/app.css?v=0.2.2-mobile-setup-1">
+  <link rel="stylesheet" href="styles/app.css?v=0.2.9-deadline-input-1">
 </head>
 <body data-theme="cloud">
   <div id="boot" class="boot hidden" role="status" aria-live="polite">
@@ -60,13 +60,31 @@
             <div id="rewardEditor" class="reward-editor"></div>
             <h3>테마</h3>
             <div id="themeEditor" class="theme-editor"></div>
+            <h3>아이 화면 표현</h3>
+            <div class="copy-style-editor">
+              <label class="preference-card"><input type="radio" name="copyStyle" value="child"><strong>아이 문구</strong><span>⭐ 3개 중 1개 했어요</span></label>
+              <label class="preference-card"><input type="radio" name="copyStyle" value="simple"><strong>간단 문구</strong><span>1 / 3 완료</span></label>
+            </div>
+            <label class="toggle-row"><input id="taskPraiseEnabled" type="checkbox"> 일반 과제 완료 시 축하 카드 표시</label>
+            <label class="preference-select">전체 진행률 축하 기준
+              <select id="progressCelebrationThreshold">
+                <option value="50">50%</option><option value="70">70%</option><option value="80">80%</option><option value="90">90%</option><option value="100">100%</option>
+              </select>
+            </label>
             <h3>화면 문구</h3>
             <div class="copy-editor">
               <label>화면 제목<input id="copyTitle" maxlength="80"></label>
               <label>첫 안내<input id="copyIntro" maxlength="160"></label>
             </div>
             <h3>완료 문구</h3>
-            <label>한 줄에 하나씩 입력<textarea id="praiseMessages" rows="10"></textarea></label>
+            <details class="message-fold">
+              <summary>🎧 듣기 완료 문구 10개</summary>
+              <label>한 줄에 하나씩 입력<textarea id="listeningPraiseMessages" rows="10"></textarea></label>
+            </details>
+            <details class="message-fold">
+              <summary>✅ 일반 과제 완료 문구 10개</summary>
+              <label>한 줄에 하나씩 입력<textarea id="taskPraiseMessages" rows="10"></textarea></label>
+            </details>
             <h3>설정 암호</h3>
             <label>4자리 이상, 비워두면 사용하지 않음<input id="parentPasscode" type="password" minlength="4" autocomplete="new-password"></label>
           </div>
@@ -99,7 +117,7 @@
       </section>
       <section id="celebration" class="celebration hidden" aria-live="polite">
         <img src="assets/cinnamoroll-celebration.webp" alt="">
-        <div><strong>🎉 이번 주도 완주했어요!</strong><p>꾸준히 해낸 너, 정말 멋져!</p></div>
+        <div><strong id="celebrationTitle">🎉 이번 주도 완주했어요!</strong><p>꾸준히 해낸 너, 정말 멋져!</p></div>
       </section>
       <p id="playbackStatus" class="sr-status" aria-live="polite"></p>
       <section id="learningGrid" class="learning-grid" aria-label="이번 주 학습"></section>
@@ -122,6 +140,8 @@
     </footer>
   </main>
 
+  <div id="taskPraiseToast" class="task-praise-toast hidden" role="status" aria-live="polite"><div id="taskPraiseCard" class="task-praise-card"></div></div>
+
   <div id="dialogLayer" class="dialog-layer hidden" role="presentation">
     <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialogTitle">
       <h2 id="dialogTitle"></h2>
@@ -135,6 +155,6 @@
     </section>
   </div>
 
-  <script type="module" src="scripts/app.js?v=0.2.2-card-layout-3"></script>
+  <script type="module" src="scripts/app.js?v=0.2.9-deadline-input-1"></script>
 </body>
 </html>

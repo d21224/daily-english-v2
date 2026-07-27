@@ -1,6 +1,5 @@
 const { chromium } = require('playwright');
 let browser;
-const baseURL = process.env.BASE_URL || 'http://127.0.0.1:4173/v0.2/daily-english.html';
 
 function silentWav(seconds = 2, sampleRate = 8000) {
   const dataSize = seconds * sampleRate * 2;
@@ -36,15 +35,24 @@ function silentWav(seconds = 2, sampleRate = 8000) {
   });
   page.on('pageerror', error => errors.push(error.message));
 
-  await page.goto(baseURL, { waitUntil: 'networkidle' });
+  await page.goto('http://127.0.0.1:4173/v0.2/daily-english.html', { waitUntil: 'networkidle' });
   await page.waitForSelector('#setupView:not(.hidden)');
   await page.screenshot({ path:'/tmp/daily-english-v02-setup.png', fullPage:true });
 
   const setupTitle = await page.locator('#setupTitle').textContent();
   if (setupTitle !== '매일영어 설정') throw new Error(`첫 화면이 설정이 아닙니다: ${setupTitle}`);
+  if (await page.locator('[data-reward-base="dailyTask"]').inputValue() !== '100') throw new Error('일반 과제 기본 포인트가 올바르지 않습니다.');
+  if (await page.locator('[data-reward-bonus="dailyTask"]').inputValue() !== '0') throw new Error('기존 포인트가 추가 포인트로 잘못 이전됐습니다.');
+  if (await page.locator('[data-reward-time="dailyTask"]').isDisabled()) throw new Error('추가 포인트 입력 전에도 마감 시간을 먼저 바꿀 수 있어야 합니다.');
+  if (!await page.locator('input[name="copyStyle"][value="child"]').isChecked()) throw new Error('아이 문구가 기본값이 아닙니다.');
+  if (!await page.locator('#taskPraiseEnabled').isChecked()) throw new Error('과제 축하 카드가 기본 켜짐이 아닙니다.');
+  if (await page.locator('#progressCelebrationThreshold').inputValue() !== '100') throw new Error('전체 진행률 축하 기본 기준이 100%가 아닙니다.');
+  const preferenceAfterTheme = await page.evaluate(() => Boolean(document.querySelector('#themeEditor').compareDocumentPosition(document.querySelector('.copy-style-editor')) & Node.DOCUMENT_POSITION_FOLLOWING));
+  if (!preferenceAfterTheme) throw new Error('아이 화면 표현 설정이 테마 아래에 있지 않습니다.');
 
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.locator('details.fold').first().locator('summary').click();
+  await page.locator('details.fold').first().locator(':scope > summary').click();
+  await page.fill('[data-reward-time="dailyTask"]', '18:00');
   const setupMetrics = await page.evaluate(() => {
     const style = selector => getComputedStyle(document.querySelector(selector));
     const listeningLabels = [...document.querySelectorAll('[data-reward="listening"] .deadline-fields label')];
@@ -69,7 +77,7 @@ function silentWav(seconds = 2, sampleRate = 8000) {
   if (setupMetrics.helperSize !== '12px') throw new Error(`도움말 크기: ${setupMetrics.helperSize}`);
   if (setupMetrics.inputSize !== '14px') throw new Error(`입력값 크기: ${setupMetrics.inputSize}`);
   if (setupMetrics.listeningTop[0] !== setupMetrics.listeningTop[1]) throw new Error('포인트와 마감시간이 같은 행이 아닙니다.');
-  if (setupMetrics.weeklyTop[1] !== setupMetrics.weeklyTop[2]) throw new Error('주간 마감 요일과 시간이 같은 행이 아닙니다.');
+  if (setupMetrics.weeklyTop[2] !== setupMetrics.weeklyTop[3]) throw new Error('주간 마감 요일과 시간이 같은 행이 아닙니다.');
   if (setupMetrics.timeRight > setupMetrics.boxRight) throw new Error('마감시간이 카드 밖으로 나갑니다.');
   await page.screenshot({ path:'/tmp/daily-english-v02-mobile-setup.png', fullPage:true });
   await page.setViewportSize({ width: 820, height: 1180 });
@@ -101,8 +109,14 @@ function silentWav(seconds = 2, sampleRate = 8000) {
   await page.fill('#dayStart', '0:00');
   await page.fill('#dayEnd', '0:01');
   await page.fill('#dayTarget', '1');
-  await page.selectOption('[data-reward-day="weeklyTask"]', '');
-  await page.fill('[data-reward-time="weeklyTask"]', '');
+  await page.fill('[data-reward-bonus="weeklyTask"]', '200');
+  await page.selectOption('[data-reward-day="weeklyTask"]', '6');
+  await page.fill('[data-reward-time="weeklyTask"]', '23:59');
+  await page.selectOption('#progressCelebrationThreshold', '50');
+  await page.locator('details.message-fold').nth(0).locator('summary').click();
+  await page.fill('#listeningPraiseMessages', '🎧 브라우저 듣기 축하');
+  await page.locator('details.message-fold').nth(1).locator('summary').click();
+  await page.fill('#taskPraiseMessages', '✅ 브라우저 과제 축하');
   await page.check('input[name="theme"][value="dark"]');
   const darkHeadingColor = await page.locator('#audioHeading').evaluate(element => getComputedStyle(element).color);
   if (darkHeadingColor !== 'rgb(237, 247, 255)') throw new Error(`다크 테마 소제목 대비가 올바르지 않습니다: ${darkHeadingColor}`);
@@ -112,6 +126,10 @@ function silentWav(seconds = 2, sampleRate = 8000) {
 
   if (await page.locator('.child-header .eyebrow').count()) throw new Error('아이 화면의 영문 소제목이 남아 있습니다.');
   if (await page.locator('.today-badge').count()) throw new Error('아이 화면의 오늘 배지가 남아 있습니다.');
+  const friendlyProgress = await page.locator('#progressLabel').textContent();
+  if (!friendlyProgress.includes('이번 주 4개 중 0개 했어요')) throw new Error(`아이용 진행률 문구가 올바르지 않습니다: ${friendlyProgress}`);
+  const friendlyGoal = await page.locator('#progressText').textContent();
+  if (!friendlyGoal.includes('이번 주 목표 50% 달성하자!')) throw new Error(`아이용 목표 문구가 올바르지 않습니다: ${friendlyGoal}`);
   const listeningMeta = page.locator('[data-card-day="day-0"] .listening-meta');
   const listeningMetaCopy = await listeningMeta.textContent();
   if (!listeningMetaCopy.includes('0:00') || !listeningMetaCopy.includes('0 / 1번')) throw new Error(`구간과 횟수가 같은 행에 없습니다: ${listeningMetaCopy}`);
@@ -124,7 +142,7 @@ function silentWav(seconds = 2, sampleRate = 8000) {
   const restCardHeight = await firstRestCard.evaluate(element => element.getBoundingClientRect().height);
   if (restCardHeight > 60) throw new Error(`쉬는 날 카드가 불필요하게 큽니다: ${restCardHeight}px`);
   const footerCopy = await page.locator('#appFooter').textContent();
-  if (!footerCopy.includes('설정 보기') || !footerCopy.includes('매일영어 v0.2.2')) throw new Error(`하단 설정 및 버전 표기가 올바르지 않습니다: ${footerCopy}`);
+  if (!footerCopy.includes('설정 보기') || !footerCopy.includes('매일영어 v0.2.9')) throw new Error(`하단 설정 및 버전 표기가 올바르지 않습니다: ${footerCopy}`);
 
   const cards = await page.locator('.learning-card').count();
   if (cards !== 8) throw new Error(`학습 카드 수가 8개가 아닙니다: ${cards}`);
@@ -136,21 +154,32 @@ function silentWav(seconds = 2, sampleRate = 8000) {
   const earlyCount = await page.locator('[data-card-day="day-0"] .count').textContent();
   if (!earlyCount.includes('0 / 1')) throw new Error(`구간 종료 전에 횟수가 증가했습니다: ${earlyCount}`);
   await page.waitForSelector('[data-card-day="day-0"] .complete-copy', { timeout: 5000 });
+  if (await page.locator('[data-card-day="day-0"] .complete-copy').textContent() !== '🎧 브라우저 듣기 축하') throw new Error('듣기 완료에 듣기 문구가 사용되지 않았습니다.');
   const completedCount = await page.locator('[data-card-day="day-0"] .count').textContent();
   if (!completedCount.includes('1 / 1')) throw new Error(`구간 종료 후 횟수가 증가하지 않았습니다: ${completedCount}`);
 
   const pointsBeforeTask = Number((await page.locator('#pointTotal').textContent()).match(/(\d+)P/)?.[1] || 0);
   let weeklyToggle = page.locator('[data-task-type="weeklyTask"]').first();
   await weeklyToggle.check();
-  await page.waitForFunction(expected => Number(document.querySelector('#pointTotal')?.textContent.match(/(\d+)P/)?.[1] || 0) === expected, pointsBeforeTask + 500);
+  await page.waitForFunction(expected => Number(document.querySelector('#pointTotal')?.textContent.match(/(\d+)P/)?.[1] || 0) === expected, pointsBeforeTask + 700);
   weeklyToggle = page.locator('[data-task-type="weeklyTask"]').first();
   await weeklyToggle.uncheck();
   weeklyToggle = page.locator('[data-task-type="weeklyTask"]').first();
   await weeklyToggle.check();
+  await page.waitForSelector('#taskPraiseToast:not(.hidden)');
+  if (await page.locator('#taskPraiseCard').textContent() !== '✅ 브라우저 과제 축하') throw new Error('일반 과제 완료에 과제 문구가 사용되지 않았습니다.');
+  const toastPosition = await page.locator('#taskPraiseToast').evaluate(element => getComputedStyle(element).position);
+  if (toastPosition !== 'fixed') throw new Error(`축하 카드가 화면 중앙 오버레이가 아닙니다: ${toastPosition}`);
+  const completedWeeklyBadge = await weeklyToggle.locator('xpath=..').locator('.point-badge').textContent();
+  if (completedWeeklyBadge.startsWith('+')) throw new Error(`완료 포인트 합계에 +가 남아 있습니다: ${completedWeeklyBadge}`);
+  await page.waitForSelector('#celebration:not(.hidden)');
+  const celebrationTitle = await page.locator('#celebrationTitle').textContent();
+  if (!celebrationTitle.includes('50%')) throw new Error(`설정한 전체 축하 기준 문구가 아닙니다: ${celebrationTitle}`);
+  if (!await page.locator('#celebration img').evaluate(element => element.classList.contains('hidden'))) throw new Error('다크 테마에서 캐릭터가 표시됩니다.');
   await page.waitForTimeout(100);
   const repeatedPoints = await page.locator('#pointTotal').textContent();
   const repeatedTotal = Number(repeatedPoints.match(/(\d+)P/)?.[1] || 0);
-  if (repeatedTotal !== pointsBeforeTask + 500) throw new Error(`과제 포인트가 중복 지급됐습니다: ${repeatedPoints}`);
+  if (repeatedTotal !== pointsBeforeTask + 700) throw new Error(`과제 포인트가 중복 지급됐습니다: ${repeatedPoints}`);
   await page.screenshot({ path:'/tmp/daily-english-v02-child.png', fullPage:true });
 
   await page.reload({ waitUntil: 'networkidle' });
@@ -185,6 +214,8 @@ function silentWav(seconds = 2, sampleRate = 8000) {
   await page.waitForSelector('#childView:not(.hidden)');
   const taskOnlyCard = page.locator('[data-card-day="day-1"]');
   if (await taskOnlyCard.getByText('듣기 없음', { exact:true }).count() !== 1) throw new Error('듣기 없는 카드에 상태가 정확히 한 번 표시되지 않습니다.');
+  const futureTaskPoint = await taskOnlyCard.locator('.task-check .point-badge').textContent();
+  if (!futureTaskPoint.includes('100P')) throw new Error(`오늘이 아닌 요일의 일반 과제 포인트가 표시되지 않습니다: ${futureTaskPoint}`);
   const listeningTaskTop = await page.locator('[data-card-day="day-0"] .daily-tasks').evaluate(element => element.offsetTop);
   const taskOnlyTaskTop = await taskOnlyCard.locator('.daily-tasks').evaluate(element => element.offsetTop);
   if (listeningTaskTop !== taskOnlyTaskTop) throw new Error(`듣기 유무에 따라 과제 시작선이 다릅니다: ${listeningTaskTop}, ${taskOnlyTaskTop}`);
@@ -201,6 +232,21 @@ function silentWav(seconds = 2, sampleRate = 8000) {
   if (mobileColumns !== 1) throw new Error(`390px 화면이 1열이 아닙니다: ${mobileColumns}`);
   await page.click('#backToSetup');
   await page.waitForSelector('#setupView:not(.hidden)');
+  if (await page.locator('#progressCelebrationThreshold').inputValue() !== '50') throw new Error('전체 축하 기준이 저장되지 않았습니다.');
+  if (await page.locator('[data-reward-time="dailyTask"]').inputValue() !== '18:00') throw new Error('추가 포인트 입력 전에 바꾼 마감 시간이 저장되지 않았습니다.');
+  if (await page.locator('[data-reward-time="weeklyTask"]').inputValue() !== '23:59') throw new Error('주간 과제 마감 시간이 저장되지 않았습니다.');
+  await page.locator('details.fold').first().locator(':scope > summary').click();
+  await page.locator('label.preference-card:has(input[name="copyStyle"][value="simple"])').click();
+  await page.uncheck('#taskPraiseEnabled');
+  await page.click('#setupForm .primary');
+  await page.waitForSelector('#childView:not(.hidden)');
+  if (await page.locator('#progressLabel').textContent() !== '이번 주 진행률') throw new Error('간단 문구로 전환되지 않았습니다.');
+  await page.locator('[data-task-type="weeklyTask"]').nth(1).check();
+  await page.waitForTimeout(150);
+  if (!await page.locator('#taskPraiseToast').evaluate(element => element.classList.contains('hidden'))) throw new Error('과제 축하 카드 끄기가 적용되지 않았습니다.');
+  await page.reload({ waitUntil:'networkidle' });
+  await page.waitForSelector('#childView:not(.hidden)');
+  if (await page.locator('#progressLabel').textContent() !== '이번 주 진행률') throw new Error('문구 스타일이 새로고침 후 유지되지 않았습니다.');
   const footerSetupTransition = 'passed';
 
   if (errors.length) throw new Error(`브라우저 오류: ${errors.join(' | ')}`);

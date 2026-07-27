@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { migrateV1 } from '../scripts/state.js';
+import { migrateV1, migrateV2, normalizePreferences } from '../scripts/state.js';
 
 const legacy = {
   screen:'child',
@@ -36,4 +36,28 @@ test('중복 이름의 주간 과제도 결정적인 별도 ID를 갖는다', ()
   assert.deepEqual(first.weeklyTasks.map(task=>task.id),['legacy-weekly-0','legacy-weekly-1']);
   assert.deepEqual(first.weeklyTasks.map(task=>task.id),second.weeklyTasks.map(task=>task.id));
   assert.notEqual(first.weeklyTasks[0].id,first.weeklyTasks[1].id);
+});
+
+test('v2 규칙은 기본 포인트로 이전하고 완료 기록은 보존한다', () => {
+  const schema2 = migrateV1(structuredClone(legacy));
+  schema2.schemaVersion = 2;
+  schema2.rewards.dailyTask = { points:100, time:'' };
+  schema2.days[0].tasks = [{id:'done',label:'읽기',done:true,completedAt:'x',reward:{points:100,eligible:true,completedAt:'x'}}];
+  const migrated = migrateV2(schema2);
+  assert.equal(migrated.schemaVersion,3);
+  assert.deepEqual(migrated.rewards.dailyTask,{basePoints:100,bonusPoints:0,bonusTime:''});
+  assert.equal(migrated.days[0].tasks[0].reward.points,100);
+});
+
+test('기존 상태에는 아이용 환경설정 기본값을 보충한다', () => {
+  const state = migrateV1(structuredClone(legacy));
+  delete state.preferences;
+  state.praiseMessages = ['기존 사용자 문구'];
+  delete state.listeningPraiseMessages;
+  delete state.taskPraiseMessages;
+  const normalized = normalizePreferences(state);
+  assert.deepEqual(normalized.preferences,{copyStyle:'child',taskPraiseEnabled:true,progressCelebrationThreshold:100});
+  assert.deepEqual(normalized.listeningPraiseMessages,['기존 사용자 문구']);
+  assert.equal(normalized.taskPraiseMessages.length,10);
+  assert.equal('praiseMessages' in normalized,false);
 });

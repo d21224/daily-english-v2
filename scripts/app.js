@@ -1,9 +1,9 @@
-import { APP_NAME, APP_VERSION, DAYS, DAY_SHORT, DEFAULT_PRAISE } from './constants.js?v=0.2.2';
+import { APP_NAME, APP_VERSION, DAYS, DAY_SHORT, DEFAULT_LISTENING_PRAISE, DEFAULT_TASK_PRAISE } from './constants.js?v=0.2.9';
 import { AudioController } from './audio-controller.js?v=0.2.2';
-import { clearAudio, clearV2, copyLegacyAudioIfAvailable, loadAudio, loadState, replaceState, saveAudio, saveState } from './storage.js?v=0.2.2';
-import { createDefaultState, createId, resetForNewWeek } from './state.js?v=0.2.2';
-import { dayIndex, formatMediaTime, getProgress, mondayKey, parseClock, parseSegment, rewardCopy, totalPoints, validateState } from './rules.js?v=0.2.2';
-import { setTaskUnchecked, settleActivity } from './settlement.js?v=0.2.2';
+import { clearAudio, clearV2, copyLegacyAudioIfAvailable, loadAudio, loadState, replaceState, saveAudio, saveState } from './storage.js?v=0.2.9';
+import { createDefaultState, createId, migrateV2, resetForNewWeek } from './state.js?v=0.2.9';
+import { dayIndex, formatMediaTime, getProgress, mondayKey, parseClock, parseSegment, rewardCopy, totalPoints, validateState } from './rules.js?v=0.2.6';
+import { setTaskUnchecked, settleActivity } from './settlement.js?v=0.2.6';
 
 const $ = id => document.getElementById(id);
 const clone = value => structuredClone(value);
@@ -14,6 +14,7 @@ let audioUrl = '';
 let dialogTrigger = null;
 let dialogResolver = null;
 let bootTimer;
+let taskPraiseTimer;
 
 const player = $('player');
 const setupPlayer = $('setupPlayer');
@@ -69,9 +70,10 @@ function rewardEditorHtml() {
     const rule = draft.rewards[key];
     return `<div class="reward-box" data-reward="${key}"><strong>${label}</strong>
       <div class="deadline-fields">
-        <label>포인트<input data-reward-points="${key}" type="number" min="0" step="10" value="${Number(rule.points)||0}"></label>
-        ${weekly ? `<label>마감 요일<select data-reward-day="${key}"><option value="">조건 없음</option>${DAYS.map((day,index)=>`<option value="${index}" ${String(rule.day)===String(index)?'selected':''}>${day}</option>`).join('')}</select></label>` : ''}
-        <label>마감 시간<input data-reward-time="${key}" type="time" value="${rule.time||''}"></label>
+        <label>기본 포인트<input data-reward-base="${key}" type="number" min="0" step="10" value="${Number(rule.basePoints)||0}"></label>
+        <label>추가 포인트<input data-reward-bonus="${key}" type="number" min="0" step="10" value="${Number(rule.bonusPoints)||0}"></label>
+        ${weekly ? `<label class="bonus-condition">마감 요일<select data-reward-day="${key}"><option value="">선택</option>${DAYS.map((day,index)=>`<option value="${index}" ${String(rule.bonusDay)===String(index)?'selected':''}>${day}</option>`).join('')}</select></label>` : ''}
+        <label class="bonus-condition">마감 시간<input data-reward-time="${key}" type="time" value="${rule.bonusTime||''}"></label>
       </div>
     </div>`;
   }).join('');
@@ -115,7 +117,11 @@ function renderSetup() {
   ].map(([key,label])=>`<label class="theme-card" data-theme="${key}"><input type="radio" name="theme" value="${key}" ${draft.theme===key?'checked':''}><div class="theme-swatch"></div><span>${label}</span></label>`).join('');
   $('copyTitle').value = draft.copy.title;
   $('copyIntro').value = draft.copy.intro;
-  $('praiseMessages').value = draft.praiseMessages.join('\n');
+  $('listeningPraiseMessages').value = draft.listeningPraiseMessages.join('\n');
+  $('taskPraiseMessages').value = draft.taskPraiseMessages.join('\n');
+  document.querySelector(`input[name="copyStyle"][value="${draft.preferences.copyStyle}"]`).checked = true;
+  $('taskPraiseEnabled').checked = draft.preferences.taskPraiseEnabled;
+  $('progressCelebrationThreshold').value = String(draft.preferences.progressCelebrationThreshold);
   $('parentPasscode').value = draft.parentPasscode;
   $('setupError').textContent = '';
   show($('setupError'), false);
@@ -141,19 +147,28 @@ function captureSetup() {
     if (input) task.label = safeText(input.value, 100);
   });
   for (const key of ['listening','dailyTask','weeklyTask']) {
-    const points = Number(document.querySelector(`[data-reward-points="${key}"]`).value);
+    const basePoints = Number(document.querySelector(`[data-reward-base="${key}"]`).value);
+    const bonusPoints = Number(document.querySelector(`[data-reward-bonus="${key}"]`).value);
     const time = document.querySelector(`[data-reward-time="${key}"]`).value;
-    draft.rewards[key].points = Number.isFinite(points) ? Math.max(0, points) : 0;
-    draft.rewards[key].time = time;
+    draft.rewards[key].basePoints = Number.isFinite(basePoints) ? Math.max(0, basePoints) : 0;
+    draft.rewards[key].bonusPoints = Number.isFinite(bonusPoints) ? Math.max(0, bonusPoints) : 0;
+    draft.rewards[key].bonusTime = time;
     const day = document.querySelector(`[data-reward-day="${key}"]`);
-    if (day) draft.rewards[key].day = day.value === '' ? '' : Number(day.value);
+    if (day) draft.rewards[key].bonusDay = day.value === '' ? '' : Number(day.value);
   }
   draft.theme = document.querySelector('input[name="theme"]:checked')?.value || 'cloud';
   draft.copy.title = safeText($('copyTitle').value, 80) || '매일영어🤍';
   draft.copy.intro = safeText($('copyIntro').value, 160);
-  draft.praiseMessages = $('praiseMessages').value.split('\n').map(value=>safeText(value,160)).filter(Boolean);
-  if (!draft.praiseMessages.length) draft.praiseMessages = [...DEFAULT_PRAISE];
+  draft.listeningPraiseMessages = $('listeningPraiseMessages').value.split('\n').map(value=>safeText(value,160)).filter(Boolean);
+  draft.taskPraiseMessages = $('taskPraiseMessages').value.split('\n').map(value=>safeText(value,160)).filter(Boolean);
+  if (!draft.listeningPraiseMessages.length) draft.listeningPraiseMessages = [...DEFAULT_LISTENING_PRAISE];
+  if (!draft.taskPraiseMessages.length) draft.taskPraiseMessages = [...DEFAULT_TASK_PRAISE];
   draft.parentPasscode = safeText($('parentPasscode').value, 40);
+  draft.preferences = {
+    copyStyle: document.querySelector('input[name="copyStyle"]:checked')?.value === 'simple' ? 'simple' : 'child',
+    taskPraiseEnabled: $('taskPraiseEnabled').checked,
+    progressCelebrationThreshold: Number($('progressCelebrationThreshold').value) || 100
+  };
   draft.audio = { ...state.audio, saveToDevice: $('saveAudio').checked };
 }
 
@@ -172,14 +187,15 @@ function validateDraft() {
   if (!draft.weeklyTasks.length) throw new Error('주간 과제는 1개 이상 남겨 주세요.');
   if (draft.parentPasscode && draft.parentPasscode.length < 4) throw new Error('설정 암호는 4자리 이상 입력해 주세요.');
   for (const rule of Object.values(draft.rewards)) {
-    if (Number(rule.points) < 0) throw new Error('포인트는 0 이상 입력해 주세요.');
-    if (parseClock(rule.time) === undefined) throw new Error('마감 시간을 확인해 주세요.');
+    if (Number(rule.basePoints) < 0 || Number(rule.bonusPoints) < 0) throw new Error('포인트는 0 이상 입력해 주세요.');
+    if (Number(rule.bonusPoints) > 0 && (parseClock(rule.bonusTime) === undefined || parseClock(rule.bonusTime) === null)) throw new Error('추가 포인트의 마감 시간을 입력해 주세요.');
   }
+  if (Number(draft.rewards.weeklyTask.bonusPoints) > 0 && draft.rewards.weeklyTask.bonusDay === '') throw new Error('주간 과제 추가 포인트의 마감 요일을 선택해 주세요.');
 }
 
 function pointBadge(rule, type, earned = null) {
-  if (earned !== null) return Number(earned) > 0 ? `<span class="point-badge">+${Number(earned)}P</span>` : '';
-  const copy = rewardCopy(rule, type);
+  if (earned !== null) return Number(earned) > 0 ? `<span class="point-badge">${Number(earned)}P</span>` : '';
+  const copy = rewardCopy(rule, type, state.preferences?.copyStyle);
   return copy ? `<span class="point-badge">${copy}</span>` : '';
 }
 
@@ -212,7 +228,7 @@ function renderDayCard(day, index, pending) {
     <div class="card-head"><span class="day-badge">${day.name}</span></div>
     ${listeningMeta}
     ${listeningAction}
-    ${day.tasks.length?`<div class="daily-tasks">${day.tasks.map(task=>taskHtml(task,'dailyTask',pending,today)).join('')}</div>`:''}
+    ${day.tasks.length?`<div class="daily-tasks">${day.tasks.map(task=>taskHtml(task,'dailyTask',pending,true)).join('')}</div>`:''}
   </article>`;
 }
 
@@ -223,12 +239,26 @@ function renderChild() {
   $('childIntro').textContent = state.copy.intro;
   show($('childIntro'), Boolean(state.copy.intro));
   const progress = getProgress(state);
-  $('progressText').textContent = `${progress.done} / ${progress.total} 완료`;
+  const childCopy = state.preferences.copyStyle === 'child';
+  $('progressLabel').textContent = childCopy ? `⭐ 이번 주 ${progress.total}개 중 ${progress.done}개 했어요` : '이번 주 진행률';
+  const remaining = Math.max(0, progress.total - progress.done);
+  $('progressText').textContent = childCopy
+    ? remaining
+      ? Number(state.preferences.progressCelebrationThreshold) === 100
+        ? '🎯 이번 주 모두 완료하자!'
+        : `🎯 이번 주 목표 ${state.preferences.progressCelebrationThreshold}% 달성하자!`
+      : '🏆 모두 끝냈어요!'
+    : `${progress.done} / ${progress.total} 완료`;
   $('progressBar').max = Math.max(1, progress.total);
   $('progressBar').value = progress.done;
   const points = totalPoints(state);
   $('pointTotal').textContent = points ? `🎁 이번 주 적립 포인트 ${points}P` : '';
-  show($('celebration'), progress.total > 0 && progress.done === progress.total);
+  const progressPercent = progress.total > 0 ? progress.done / progress.total * 100 : 0;
+  const celebrationThreshold = Number(state.preferences.progressCelebrationThreshold) || 100;
+  show($('celebration'), progress.total > 0 && progressPercent >= celebrationThreshold);
+  $('celebrationTitle').textContent = celebrationThreshold === 100
+    ? '🏆 이번 주 할 일을 모두 끝냈어요!'
+    : `🎉 이번 주 목표 ${celebrationThreshold}%를 달성했어요!`;
   $('celebration').querySelector('img').classList.toggle('hidden', state.theme !== 'cloud');
   show($('rolloverNotice'), pending);
   $('rolloverNotice').innerHTML = pending ? `새 주 학습표를 준비하려면 보호자 확인이 필요해요. <button type="button" class="small-button" data-confirm-rollover>보호자 확인</button>` : '';
@@ -256,7 +286,7 @@ function updatePlaybackButton({ percent, paused, dayId }) {
 
 async function completeListening(run) {
   try {
-    const praise = state.praiseMessages[Math.floor(Math.random() * state.praiseMessages.length)] || DEFAULT_PRAISE[0];
+    const praise = state.listeningPraiseMessages[Math.floor(Math.random() * state.listeningPraiseMessages.length)] || DEFAULT_LISTENING_PRAISE[0];
     const result = await settleActivity({ expectedEpoch: state.stateEpoch, type: 'listening', id: run.day.id, runId: run.runId, praise });
     if (result.status === 'stale') throw new Error('학습표가 바뀌었어요. 다시 시작해 주세요.');
     state = result.state || await loadState();
@@ -279,15 +309,27 @@ async function toggleTask(input) {
       const result = await settleActivity({ expectedEpoch: state.stateEpoch, type, id });
       if (result.status === 'stale') throw new Error('학습표가 바뀌었어요.');
       state = result.state || await loadState();
+      renderChild();
+      showTaskPraise();
     } else {
       state = await setTaskUnchecked({ expectedEpoch: state.stateEpoch, type, id });
+      renderChild();
     }
-    renderChild();
   } catch (error) {
     state = await loadState();
     renderChild();
     showChildNotice('과제 기록을 저장하지 못했어요. 다시 시도해 주세요.', true);
   }
+}
+
+function showTaskPraise() {
+  if (!state.preferences?.taskPraiseEnabled) return;
+  const messages = state.taskPraiseMessages?.length ? state.taskPraiseMessages : DEFAULT_TASK_PRAISE;
+  const toast = $('taskPraiseToast');
+  $('taskPraiseCard').textContent = messages[Math.floor(Math.random() * messages.length)] || DEFAULT_TASK_PRAISE[0];
+  clearTimeout(taskPraiseTimer);
+  show(toast, true);
+  taskPraiseTimer = setTimeout(() => show(toast, false), 2000);
 }
 
 async function chooseAudio(file) {
@@ -384,13 +426,13 @@ async function importBackupFile(file) {
   try {
     const parsed = JSON.parse(await file.text());
     if (parsed?.app !== APP_NAME || parsed?.version !== 2) throw new Error('매일영어 v0.2 백업 파일이 아니에요.');
-    const next = validateState(clone(parsed.state));
+    const imported = clone(parsed.state);
+    const next = validateState(imported.schemaVersion === 2 ? migrateV2(imported) : imported);
     next.stateEpoch = createId('epoch');
     next.revision = Number(next.revision || 0) + 1;
     next.screen = 'setup';
     audioController.invalidate();
-    await replaceState(next);
-    state = next;
+    state = await replaceState(next);
     renderCurrentScreen();
     $('setupError').textContent = '백업을 불러왔어요. 오디오는 필요하면 다시 연결해 주세요.';
     show($('setupError'), true);

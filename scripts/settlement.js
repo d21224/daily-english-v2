@@ -1,5 +1,5 @@
-import { openDatabase } from './storage.js?v=0.2.2';
-import { eligibleForReward } from './rules.js?v=0.2.2';
+import { openDatabase } from './storage.js?v=0.2.6';
+import { calculateReward } from './rules.js?v=0.2.6';
 
 const STATE_KEY = 'current';
 
@@ -69,11 +69,11 @@ export async function settleActivity({ expectedEpoch, type, id, runId = '', comp
           item.done = true;
         }
         const rule = state.rewards[type];
-        const points = eligibleForReward(type, dayIndex, rule, date);
+        const earned = calculateReward(type, dayIndex, rule, date);
         item.completedAt = date.toISOString();
-        item.reward = { points, eligible: points > 0, completedAt: item.completedAt };
+        item.reward = { ...earned, eligible: earned.bonusEarned > 0, completedAt: item.completedAt };
         if (type === 'listening') item.praise = String(praise || '');
-        const record = { key, runId, type, id, completedAt: item.completedAt, points };
+        const record = { key, runId, type, id, completedAt: item.completedAt, ...earned };
         ledgerStore.put(record);
         state.revision += 1;
         stateStore.put(state, STATE_KEY);

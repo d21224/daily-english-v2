@@ -1,4 +1,4 @@
-import { DAY_SHORT } from './constants.js?v=0.2.2';
+import { DAY_SHORT } from './constants.js?v=0.2.6';
 
 export function localDateKey(date = new Date()) {
   const y = date.getFullYear();
@@ -48,32 +48,60 @@ export function dayIndex(date = new Date()) {
   return (date.getDay() + 6) % 7;
 }
 
-export function eligibleForReward(type, assignedDay, rule, completedAt = new Date()) {
-  if (!rule || Number(rule.points) <= 0) return 0;
+function meetsBonusDeadline(type, assignedDay, rule, completedAt = new Date()) {
   const now = completedAt instanceof Date ? completedAt : new Date(completedAt);
   const clock = now.getHours() * 60 + now.getMinutes();
-  const cutoff = parseClock(rule.time ?? '');
+  const cutoff = parseClock(rule.bonusTime ?? '');
   if (type === 'weeklyTask') {
-    if (rule.day === '' || rule.day === null || rule.day === undefined) return cutoff === null || clock < cutoff ? Number(rule.points) : 0;
+    if (rule.bonusDay === '' || rule.bonusDay === null || rule.bonusDay === undefined) return cutoff === null || clock < cutoff;
     const current = dayIndex(now);
-    const deadline = Number(rule.day);
-    if (current < deadline) return Number(rule.points);
-    if (current > deadline) return 0;
-    return cutoff === null || clock < cutoff ? Number(rule.points) : 0;
+    const deadline = Number(rule.bonusDay);
+    if (current < deadline) return true;
+    if (current > deadline) return false;
+    return cutoff === null || clock < cutoff;
   }
-  if (dayIndex(now) !== Number(assignedDay)) return 0;
-  return cutoff === null || clock < cutoff ? Number(rule.points) : 0;
+  if (dayIndex(now) !== Number(assignedDay)) return false;
+  return cutoff === null || clock < cutoff;
 }
 
-export function rewardCopy(rule, type) {
-  const points = Number(rule?.points) || 0;
-  if (!points) return '';
-  const time = rule.time || '';
-  if (type === 'weeklyTask' && rule.day !== '' && rule.day !== null && rule.day !== undefined) {
-    const dayName = DAY_SHORT[Number(rule.day)] || '';
-    return time ? `${dayName} ${time}까지 · ${points}P` : `${dayName}까지 · ${points}P`;
+export function calculateReward(type, assignedDay, rule, completedAt = new Date()) {
+  const baseEarned = Math.max(0, Number(rule?.basePoints) || 0);
+  const bonusPoints = Math.max(0, Number(rule?.bonusPoints) || 0);
+  const bonusEarned = bonusPoints > 0 && meetsBonusDeadline(type, assignedDay, rule, completedAt) ? bonusPoints : 0;
+  return { baseEarned, bonusEarned, points: baseEarned + bonusEarned };
+}
+
+function friendlyTime(value) {
+  const minutes = parseClock(value);
+  if (minutes === null || minutes === undefined) return '';
+  const hour24 = Math.floor(minutes / 60);
+  const minute = minutes % 60;
+  const period = hour24 >= 5 && hour24 < 11 ? ['🌅','아침']
+    : hour24 >= 11 && hour24 < 14 ? ['☀️','낮']
+      : hour24 >= 14 && hour24 < 18 ? ['🌤️','오후']
+        : hour24 >= 18 && hour24 < 22 ? ['🌙','저녁'] : ['🌙','밤'];
+  const hour = hour24 === 0 ? 12 : hour24 > 12 ? hour24 - 12 : hour24;
+  return `${period[0]} ${period[1]} ${hour}시${minute ? ` ${minute}분` : ''}`;
+}
+
+export function rewardCopy(rule, type, style = 'simple') {
+  const base = Math.max(0, Number(rule?.basePoints) || 0);
+  const bonus = Math.max(0, Number(rule?.bonusPoints) || 0);
+  if (!base && !bonus) return '';
+  if (!bonus) return `${base}P`;
+  const time = rule.bonusTime || '';
+  if (style === 'child') {
+    const dayName = type === 'weeklyTask' && rule.bonusDay !== '' && rule.bonusDay !== null && rule.bonusDay !== undefined
+      ? `${DAY_SHORT[Number(rule.bonusDay)] || ''}요일 ` : '';
+    const condition = time ? `${friendlyTime(time)} 전에 하면` : '일찍 하면';
+    return `${base}P · ${condition.replace(' ', ` ${dayName}`).trim()} ${bonus}P 더!`;
   }
-  return time ? `${time}까지 · ${points}P` : `${points}P`;
+  let condition = time ? `${time} 전` : '일찍 완료';
+  if (type === 'weeklyTask' && rule.bonusDay !== '' && rule.bonusDay !== null && rule.bonusDay !== undefined) {
+    const dayName = DAY_SHORT[Number(rule.bonusDay)] || '';
+    condition = time ? `${dayName} ${time} 전` : `${dayName} 전`;
+  }
+  return `기본 ${base}P · ${condition} +${bonus}P`;
 }
 
 export function getActiveItems(state) {
@@ -102,7 +130,7 @@ export function totalPoints(state) {
 }
 
 export function validateState(state) {
-  if (!state || state.schemaVersion !== 2 || !Array.isArray(state.days) || state.days.length !== 7) throw new Error('저장된 학습표 형식이 올바르지 않아요.');
+  if (!state || state.schemaVersion !== 3 || !Array.isArray(state.days) || state.days.length !== 7) throw new Error('저장된 학습표 형식이 올바르지 않아요.');
   if (!Array.isArray(state.weeklyTasks) || !state.rewards || !state.copy) throw new Error('저장된 과제 또는 화면 설정이 올바르지 않아요.');
   for (const day of state.days) {
     if (!day.id || !Array.isArray(day.tasks) || Number(day.target) < 0) throw new Error('요일별 학습 설정이 올바르지 않아요.');

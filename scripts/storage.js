@@ -1,6 +1,6 @@
-import { DB_NAME, DB_VERSION, V1_AUDIO_DB, V1_STATE_KEY } from './constants.js?v=0.2.2';
-import { createDefaultState, migrateV1 } from './state.js?v=0.2.2';
-import { validateState } from './rules.js?v=0.2.2';
+import { DB_NAME, DB_VERSION, V1_AUDIO_DB, V1_STATE_KEY } from './constants.js?v=0.2.9';
+import { createDefaultState, migrateV1, migrateV2, normalizePreferences } from './state.js?v=0.2.9';
+import { validateState } from './rules.js?v=0.2.6';
 
 const STATE_KEY = 'current';
 const AUDIO_KEY = 'current';
@@ -28,12 +28,18 @@ function requestValue(request) {
 
 export async function loadState() {
   const db = await openDatabase();
+  let saved;
   try {
     const tx = db.transaction('state', 'readonly');
-    const saved = await requestValue(tx.objectStore('state').get(STATE_KEY));
-    if (saved) return validateState(saved);
+    saved = await requestValue(tx.objectStore('state').get(STATE_KEY));
   } finally {
     db.close();
+  }
+  if (saved) {
+    const normalized = saved.schemaVersion === 2 ? migrateV2(saved) : normalizePreferences(saved);
+    validateState(normalized);
+    if (!saved.preferences || !saved.listeningPraiseMessages || !saved.taskPraiseMessages || JSON.stringify(saved.preferences) !== JSON.stringify(normalized.preferences)) await saveState(normalized);
+    return normalized;
   }
   const legacyRaw = localStorage.getItem(V1_STATE_KEY);
   const initial = legacyRaw ? migrateV1(JSON.parse(legacyRaw)) : createDefaultState();
@@ -54,13 +60,14 @@ export async function saveState(state) {
 }
 
 export async function replaceState(state) {
-  validateState(state);
+  const normalized = state?.schemaVersion === 2 ? migrateV2(state) : normalizePreferences(state);
+  validateState(normalized);
   const db = await openDatabase();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(['state','ledger'], 'readwrite');
-    tx.objectStore('state').put(structuredClone(state), STATE_KEY);
+    tx.objectStore('state').put(structuredClone(normalized), STATE_KEY);
     tx.objectStore('ledger').clear();
-    tx.oncomplete = () => { db.close(); resolve(state); };
+    tx.oncomplete = () => { db.close(); resolve(normalized); };
     tx.onerror = () => { const error = tx.error; db.close(); reject(error); };
   });
 }
