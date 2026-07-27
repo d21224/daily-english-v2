@@ -32,3 +32,4 @@ body[data-theme=light]{--ink:#1d2832;--muted:#66727c;--line:#d9d6d0;--paper:#f3e
 .message-fold{margin-top:8px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}.message-fold summary{min-height:44px;padding:12px;color:var(--ink);font-size:13px;font-weight:850}.message-fold label{display:block;padding:0 12px 12px;color:var(--muted);font-size:12px;font-weight:750}.message-fold textarea{margin-top:6px}
 @media(max-width:599px){.copy-style-editor{grid-template-columns:1fr 1fr}.preference-select{grid-template-columns:1fr 100px}}
 @media(prefers-reduced-motion:no-preference){.task-praise-toast:not(.hidden) .task-praise-card{animation:toast-in .2s ease-out}@keyframes toast-in{from{opacity:0;transform:translateY(8px) scale(.97)}to{opacity:1;transform:none}}}
+.management .file-button{font-size:14px}

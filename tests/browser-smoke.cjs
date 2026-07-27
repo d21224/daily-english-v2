@@ -47,6 +47,11 @@ function silentWav(seconds = 2, sampleRate = 8000) {
   if (!await page.locator('input[name="copyStyle"][value="child"]').isChecked()) throw new Error('아이 문구가 기본값이 아닙니다.');
   if (!await page.locator('#taskPraiseEnabled').isChecked()) throw new Error('과제 축하 카드가 기본 켜짐이 아닙니다.');
   if (await page.locator('#progressCelebrationThreshold').inputValue() !== '100') throw new Error('전체 진행률 축하 기본 기준이 100%가 아닙니다.');
+  const managementFontSizes = await page.evaluate(() => ({
+    button: getComputedStyle(document.querySelector('#exportBackup')).fontSize,
+    file: getComputedStyle(document.querySelector('label:has(#importBackup)')).fontSize
+  }));
+  if (managementFontSizes.file !== managementFontSizes.button) throw new Error(`백업 파일 불러오기 글자 크기가 다릅니다: ${managementFontSizes.file} / ${managementFontSizes.button}`);
   const preferenceAfterTheme = await page.evaluate(() => Boolean(document.querySelector('#themeEditor').compareDocumentPosition(document.querySelector('.copy-style-editor')) & Node.DOCUMENT_POSITION_FOLLOWING));
   if (!preferenceAfterTheme) throw new Error('아이 화면 표현 설정이 테마 아래에 있지 않습니다.');
 
@@ -142,7 +147,7 @@ function silentWav(seconds = 2, sampleRate = 8000) {
   const restCardHeight = await firstRestCard.evaluate(element => element.getBoundingClientRect().height);
   if (restCardHeight > 60) throw new Error(`쉬는 날 카드가 불필요하게 큽니다: ${restCardHeight}px`);
   const footerCopy = await page.locator('#appFooter').textContent();
-  if (!footerCopy.includes('설정 보기') || !footerCopy.includes('매일영어 v0.2.9')) throw new Error(`하단 설정 및 버전 표기가 올바르지 않습니다: ${footerCopy}`);
+  if (!footerCopy.includes('설정 보기') || !footerCopy.includes('매일영어 v0.2.10')) throw new Error(`하단 설정 및 버전 표기가 올바르지 않습니다: ${footerCopy}`);
 
   const cards = await page.locator('.learning-card').count();
   if (cards !== 8) throw new Error(`학습 카드 수가 8개가 아닙니다: ${cards}`);
