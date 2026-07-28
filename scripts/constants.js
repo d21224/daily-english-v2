@@ -1,5 +1,5 @@
 export const APP_NAME = '매일영어';
-export const APP_VERSION = '0.2.12';
+export const APP_VERSION = '0.2.13';
 export const SCHEMA_VERSION = 3;
 export const DB_NAME = 'dailyEnglishV2';
 export const DB_VERSION = 1;

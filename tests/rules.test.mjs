@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createDefaultState, resetForNewWeek } from '../scripts/state.js';
-import { calculateReward, getProgress, mondayKey, parseSegment, rewardCopy } from '../scripts/rules.js';
+import { calculateReward, getProgress, mondayKey, parseSegment, rewardCopy, totalPoints } from '../scripts/rules.js';
 
 test('하이픈과 en dash 구간을 모두 파싱한다', () => {
   assert.deepEqual(parseSegment('10:11-10:20'), { start: 611, end: 620 });
@@ -16,6 +16,19 @@ test('월~일 듣기와 일일/주간 과제를 함께 진행률에 포함한다
   state.days[0].tasks.push({ id:'daily-a', label:'읽기', done:false, completedAt:'', reward:{points:0} });
   state.weeklyTasks = [{ id:'weekly-a', label:'영상', done:true, completedAt:'x', reward:{points:0} }];
   assert.deepEqual(getProgress(state), { done: 2, total: 3 });
+});
+
+test('체크 해제된 과제에 과거 보상 기록이 남아 있어도 포인트에서 제외한다', () => {
+  const state = createDefaultState(new Date(2026, 6, 27));
+  state.days[0].target = 2;
+  state.days[0].count = 2;
+  state.days[0].reward.points = 100;
+  state.days[0].tasks = [
+    { id:'done', label:'완료 과제', done:true, completedAt:'done', reward:{points:100} },
+    { id:'unchecked', label:'해제 과제', done:false, completedAt:'old', reward:{points:1100} }
+  ];
+
+  assert.equal(totalPoints(state), 200);
 });
 
 test('일일 보상은 기본 포인트를 항상 지급하고 마감 전 보너스를 더한다', () => {

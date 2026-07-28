@@ -1,6 +1,6 @@
-import { DB_NAME, DB_VERSION, V1_AUDIO_DB, V1_STATE_KEY } from './constants.js?v=0.2.12';
-import { createDefaultState, migrateV1, migrateV2, normalizePreferences } from './state.js?v=0.2.12';
-import { validateState } from './rules.js?v=0.2.6';
+import { DB_NAME, DB_VERSION, V1_AUDIO_DB, V1_STATE_KEY } from './constants.js?v=0.2.13';
+import { createDefaultState, migrateV1, migrateV2, normalizePreferences } from './state.js?v=0.2.13';
+import { validateState } from './rules.js?v=0.2.13';
 
 const STATE_KEY = 'current';
 const AUDIO_KEY = 'current';

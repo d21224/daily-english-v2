@@ -123,9 +123,13 @@ export function totalPoints(state) {
   let total = 0;
   state.days.forEach(day => {
     total += Number(day.reward?.points) || 0;
-    day.tasks.forEach(task => { total += Number(task.reward?.points) || 0; });
+    day.tasks.forEach(task => {
+      if (task.done) total += Number(task.reward?.points) || 0;
+    });
   });
-  state.weeklyTasks.forEach(task => { total += Number(task.reward?.points) || 0; });
+  state.weeklyTasks.forEach(task => {
+    if (task.done) total += Number(task.reward?.points) || 0;
+  });
   return total;
 }
 

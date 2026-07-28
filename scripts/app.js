@@ -1,9 +1,9 @@
-import { APP_NAME, APP_VERSION, DAYS, DAY_SHORT, DEFAULT_LISTENING_PRAISE, DEFAULT_TASK_PRAISE } from './constants.js?v=0.2.12';
+import { APP_NAME, APP_VERSION, DAYS, DAY_SHORT, DEFAULT_LISTENING_PRAISE, DEFAULT_TASK_PRAISE } from './constants.js?v=0.2.13';
 import { AudioController } from './audio-controller.js?v=0.2.2';
-import { clearAudio, clearV2, copyLegacyAudioIfAvailable, loadAudio, loadState, replaceState, saveAudio, saveState } from './storage.js?v=0.2.12';
-import { createDefaultState, createId, migrateV2, resetForNewWeek } from './state.js?v=0.2.12';
-import { dayIndex, getProgress, mondayKey, parseClock, parseSegment, rewardCopy, totalPoints, validateState } from './rules.js?v=0.2.6';
-import { setTaskUnchecked, settleActivity } from './settlement.js?v=0.2.12';
+import { clearAudio, clearV2, copyLegacyAudioIfAvailable, loadAudio, loadState, replaceState, saveAudio, saveState } from './storage.js?v=0.2.13';
+import { createDefaultState, createId, migrateV2, resetForNewWeek } from './state.js?v=0.2.13';
+import { dayIndex, getProgress, mondayKey, parseClock, parseSegment, rewardCopy, totalPoints, validateState } from './rules.js?v=0.2.13';
+import { setTaskUnchecked, settleActivity } from './settlement.js?v=0.2.13';
 
 const $ = id => document.getElementById(id);
 const clone = value => structuredClone(value);
