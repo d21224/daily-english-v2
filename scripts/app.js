@@ -1,9 +1,9 @@
-import { APP_NAME, APP_VERSION, DAYS, DAY_SHORT, DEFAULT_LISTENING_PRAISE, DEFAULT_TASK_PRAISE } from './constants.js?v=0.2.10';
+import { APP_NAME, APP_VERSION, DAYS, DAY_SHORT, DEFAULT_LISTENING_PRAISE, DEFAULT_TASK_PRAISE } from './constants.js?v=0.2.12';
 import { AudioController } from './audio-controller.js?v=0.2.2';
-import { clearAudio, clearV2, copyLegacyAudioIfAvailable, loadAudio, loadState, replaceState, saveAudio, saveState } from './storage.js?v=0.2.10';
-import { createDefaultState, createId, migrateV2, resetForNewWeek } from './state.js?v=0.2.10';
-import { dayIndex, formatMediaTime, getProgress, mondayKey, parseClock, parseSegment, rewardCopy, totalPoints, validateState } from './rules.js?v=0.2.6';
-import { setTaskUnchecked, settleActivity } from './settlement.js?v=0.2.6';
+import { clearAudio, clearV2, copyLegacyAudioIfAvailable, loadAudio, loadState, replaceState, saveAudio, saveState } from './storage.js?v=0.2.12';
+import { createDefaultState, createId, migrateV2, resetForNewWeek } from './state.js?v=0.2.12';
+import { dayIndex, getProgress, mondayKey, parseClock, parseSegment, rewardCopy, totalPoints, validateState } from './rules.js?v=0.2.6';
+import { setTaskUnchecked, settleActivity } from './settlement.js?v=0.2.12';
 
 const $ = id => document.getElementById(id);
 const clone = value => structuredClone(value);
@@ -39,6 +39,14 @@ function themeValue(value) {
 
 function applyTheme(value) {
   document.body.dataset.theme = themeValue(value);
+}
+
+function refreshApp() {
+  audioController.invalidate();
+  const url = new URL(location.href);
+  url.search = '';
+  url.searchParams.set('_refresh', String(Date.now()));
+  location.replace(url);
 }
 
 function rolloverPending() {
@@ -79,16 +87,31 @@ function rewardEditorHtml() {
   }).join('');
 }
 
+function mediaParts(totalSeconds) {
+  const safe = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+  return {
+    minutes: String(Math.floor(safe / 60)),
+    seconds: String(safe % 60).padStart(2, '0')
+  };
+}
+
+function captureMediaTime(prefix) {
+  const minutes = $(`${prefix}Minutes`)?.value.trim() || '';
+  const seconds = $(`${prefix}Seconds`)?.value.trim() || '';
+  if (!minutes && !seconds) return '';
+  return `${minutes}:${seconds}`;
+}
+
 function renderDayEditor() {
   const day = draft.days[selectedDay];
   $('dayTabs').innerHTML = DAY_SHORT.map((label,index)=>`<button class="day-tab" type="button" role="tab" data-day-tab="${index}" aria-selected="${selectedDay===index}">${label}</button>`).join('');
   const segment = parseSegment(day.segment);
-  const start = segment ? formatMediaTime(segment.start) : '';
-  const end = segment ? formatMediaTime(segment.end) : '';
+  const start = segment ? mediaParts(segment.start) : { minutes:'', seconds:'' };
+  const end = segment ? mediaParts(segment.end) : { minutes:'', seconds:'' };
   $('dayEditor').innerHTML = `<h3>${day.name} 설정</h3>
     <div class="field-grid">
-      <label>듣기 시작<input id="dayStart" inputmode="decimal" placeholder="예: 10:11" value="${start}"></label>
-      <label>듣기 종료<input id="dayEnd" inputmode="decimal" placeholder="예: 10:20" value="${end}"></label>
+      <label>듣기 시작<span class="media-time-input"><input id="dayStartMinutes" type="number" min="0" step="1" inputmode="numeric" placeholder="분" aria-label="듣기 시작 분" value="${start.minutes}"><span aria-hidden="true">:</span><input id="dayStartSeconds" type="number" min="0" max="59" step="1" inputmode="numeric" placeholder="초" aria-label="듣기 시작 초" value="${start.seconds}"></span></label>
+      <label>듣기 종료<span class="media-time-input"><input id="dayEndMinutes" type="number" min="0" step="1" inputmode="numeric" placeholder="분" aria-label="듣기 종료 분" value="${end.minutes}"><span aria-hidden="true">:</span><input id="dayEndSeconds" type="number" min="0" max="59" step="1" inputmode="numeric" placeholder="초" aria-label="듣기 종료 초" value="${end.seconds}"></span></label>
       <label>목표 횟수<input id="dayTarget" type="number" min="0" step="1" inputmode="numeric" value="${Number(day.target)||0}"></label>
     </div>
     <div class="task-editor">${day.tasks.map(task=>`<div class="task-input-row"><input data-daily-task="${task.id}" maxlength="100" placeholder="과제 이름" value="${escapeAttribute(task.label)}"><button class="delete-button" type="button" data-delete-daily="${task.id}" aria-label="${task.label?`${escapeAttribute(task.label)} 삭제`:'과제 삭제'}">삭제</button></div>`).join('')}</div>
@@ -128,8 +151,8 @@ function renderSetup() {
 }
 
 function captureCurrentDay() {
-  const start = $('dayStart')?.value.trim() || '';
-  const end = $('dayEnd')?.value.trim() || '';
+  const start = captureMediaTime('dayStart');
+  const end = captureMediaTime('dayEnd');
   const target = Number($('dayTarget')?.value || 0);
   const day = draft.days[selectedDay];
   day.segment = start || end ? `${start}-${end}` : '';
@@ -374,7 +397,7 @@ function closeDialog(value) {
 }
 
 async function confirmNewWeek(trigger) {
-  const okay = await openDialog({ title:'새 주를 시작할까요?', message:'설정·테마·암호는 유지하고 듣기 횟수·과제 체크·포인트·완료 문구만 초기화합니다.', confirm:'초기화하고 시작', trigger });
+  const okay = await openDialog({ title:'새 주를 시작할까요?', message:'설정은 유지하고 이번 주 듣기 횟수·과제 체크·적립 포인트·완료 표시만 초기화합니다.', confirm:'초기화하고 시작', trigger });
   if (!okay) return;
   audioController.invalidate();
   state = resetForNewWeek(state);
@@ -420,29 +443,48 @@ function exportBackup() {
   setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
 
-async function importBackupFile(file) {
+async function prepareBackupState(file) {
+  const parsed = JSON.parse(await file.text());
+  if (parsed?.app !== APP_NAME || parsed?.version !== 2) throw new Error('invalid-backup');
+  const imported = clone(parsed.state);
+  return validateState(imported.schemaVersion === 2 ? migrateV2(imported) : imported);
+}
+
+async function importBackupFile(file, input) {
   if (!file) return;
   const current = state;
   try {
-    const parsed = JSON.parse(await file.text());
-    if (parsed?.app !== APP_NAME || parsed?.version !== 2) throw new Error('매일영어 v0.2 백업 파일이 아니에요.');
-    const imported = clone(parsed.state);
-    const next = validateState(imported.schemaVersion === 2 ? migrateV2(imported) : imported);
+    const next = await prepareBackupState(file);
+    const confirmed = await openDialog({
+      title: '백업으로 복원할까요?',
+      message: '현재 설정과 학습 기록이 백업 파일의 내용으로 바뀝니다. 오디오는 바뀌지 않아요.',
+      confirmText: '복원하기',
+      trigger: input?.closest('label') || input
+    });
+    if (!confirmed) return;
+
     next.stateEpoch = createId('epoch');
     next.revision = Number(next.revision || 0) + 1;
     next.screen = 'setup';
     audioController.invalidate();
     state = await replaceState(next);
     renderCurrentScreen();
-    $('setupError').textContent = '백업을 불러왔어요. 오디오는 필요하면 다시 연결해 주세요.';
+    $('setupError').textContent = '백업을 복원했어요. 오디오는 필요하면 다시 연결해 주세요.';
     show($('setupError'), true);
   } catch (error) {
     state = current;
-    if (state) {
+    const message = '백업 파일을 확인할 수 없어요. 매일영어에서 저장한 JSON 파일인지 확인해 주세요.';
+    if (input?.id === 'fatalImport') {
+      $('fatalMessage').textContent = message;
+    } else if (state) {
       renderCurrentScreen();
-      $('setupError').textContent = `백업을 불러오지 못했어요: ${error.message}`;
+      $('setupError').textContent = message;
       show($('setupError'), true);
-    } else showFatal(error);
+    } else {
+      showFatal(new Error(message));
+    }
+  } finally {
+    if (input) input.value = '';
   }
 }
 
@@ -546,6 +588,8 @@ $('setupForm').addEventListener('submit', async event => {
 });
 
 $('audioFile').addEventListener('change', event => chooseAudio(event.target.files[0]));
+$('setupRefresh').addEventListener('click', refreshApp);
+$('childRefresh').addEventListener('click', refreshApp);
 $('learningGrid').addEventListener('click', async event => {
   const play = event.target.closest('[data-play-day]');
   if (play) {
@@ -576,8 +620,8 @@ $('backToSetup').addEventListener('click', async event => {
 });
 $('newWeekButton').addEventListener('click', event => confirmNewWeek(event.currentTarget));
 $('exportBackup').addEventListener('click', exportBackup);
-$('importBackup').addEventListener('change', event => importBackupFile(event.target.files[0]));
-$('fatalImport').addEventListener('change', event => importBackupFile(event.target.files[0]));
+$('importBackup').addEventListener('change', event => importBackupFile(event.currentTarget.files[0], event.currentTarget));
+$('fatalImport').addEventListener('change', event => importBackupFile(event.currentTarget.files[0], event.currentTarget));
 $('resetApp').addEventListener('click', async event => {
   const okay = await openDialog({title:'설정을 초기화할까요?',message:'v0.2 설정, 진도, 저장 오디오를 이 기기에서 삭제합니다. v0.1 데이터는 유지됩니다.',confirm:'초기화',trigger:event.currentTarget});
   if (!okay) return;

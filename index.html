@@ -8,7 +8,7 @@
   <link rel="icon" href="assets/app-icon-512.png">
   <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="stylesheet" href="styles/app.css?v=0.2.10-management-font-1">
+  <link rel="stylesheet" href="styles/app.css?v=0.2.12-refresh-week-backup-1">
 </head>
 <body data-theme="cloud">
   <div id="boot" class="boot hidden" role="status" aria-live="polite">
@@ -19,14 +19,25 @@
 
   <main id="app" class="app hidden">
     <section id="setupView" class="view setup-view hidden" aria-labelledby="setupTitle">
-      <header class="setup-header">
-        <p class="eyebrow">DAILY ENGLISH · SETTINGS</p>
-        <h1 id="setupTitle">매일영어 설정</h1>
-        <p>날짜별 듣기와 과제를 정해 주세요.</p>
+      <header class="setup-header app-header">
+        <div class="header-copy">
+          <p class="eyebrow">DAILY ENGLISH · SETTINGS</p>
+          <h1 id="setupTitle">매일영어 설정</h1>
+          <p>날짜별 듣기와 과제를 정해 주세요.</p>
+        </div>
+        <button id="setupRefresh" class="refresh-button" type="button" aria-label="앱 새로고침" title="앱 새로고침">↻</button>
         <div id="audioStatus" class="status-line"></div>
       </header>
 
       <form id="setupForm" novalidate>
+        <aside id="newWeekPanel" class="new-week-panel" aria-labelledby="newWeekTitle">
+          <div>
+            <strong id="newWeekTitle">새 주 학습 시작</strong>
+            <p>구간·과제·포인트 규칙·테마·암호·오디오는 유지하고, 듣기 횟수·과제 체크·적립 포인트만 초기화해요.</p>
+          </div>
+          <button id="newWeekButton" class="secondary" type="button">새 주 시작</button>
+        </aside>
+
         <section class="setup-section" aria-labelledby="audioHeading">
           <div class="section-head"><span>1</span><h2 id="audioHeading">오디오</h2></div>
           <div class="file-row">
@@ -93,20 +104,29 @@
         <details class="fold">
           <summary>관리 도구</summary>
           <div class="fold-body management">
-            <button id="newWeekButton" class="secondary" type="button">새 주 학습 시작</button>
-            <button id="exportBackup" class="secondary" type="button">백업 파일 저장</button>
-            <label class="secondary file-button">백업 파일 불러오기<input id="importBackup" type="file" accept="application/json,.json"></label>
-            <button id="resetApp" class="danger-button" type="button">설정 초기화</button>
-            <p class="version">오디오는 백업 파일에 포함되지 않습니다.</p>
+            <section class="backup-tools" aria-labelledby="backupToolsTitle">
+              <h3 id="backupToolsTitle">백업 및 복원</h3>
+              <p class="helper">설정과 학습 기록을 파일로 보관하거나 복원해요. 오디오는 포함되지 않아요.</p>
+              <div class="management-actions">
+                <button id="exportBackup" class="secondary" type="button">백업 저장</button>
+                <label class="secondary file-button">백업에서 복원<input id="importBackup" type="file" accept="application/json,.json"></label>
+              </div>
+            </section>
+            <div class="management-danger">
+              <button id="resetApp" class="danger-button" type="button">설정 초기화</button>
+            </div>
           </div>
         </details>
       </form>
     </section>
 
     <section id="childView" class="view child-view hidden" aria-labelledby="childTitle">
-      <header class="child-header">
-        <h1 id="childTitle">매일영어🤍</h1>
-        <p id="childIntro">오늘 할 일부터 하나씩 해보자.</p>
+      <header class="child-header app-header">
+        <div class="header-copy">
+          <h1 id="childTitle">매일영어🤍</h1>
+          <p id="childIntro">오늘 할 일부터 하나씩 해보자.</p>
+        </div>
+        <button id="childRefresh" class="refresh-button" type="button" aria-label="앱 새로고침" title="앱 새로고침">↻</button>
       </header>
       <section id="rolloverNotice" class="notice warning hidden"></section>
       <section id="childAudioNotice" class="notice hidden"></section>
@@ -155,6 +175,6 @@
     </section>
   </div>
 
-  <script type="module" src="scripts/app.js?v=0.2.10-management-font-1"></script>
+  <script type="module" src="scripts/app.js?v=0.2.12-refresh-week-backup-1"></script>
 </body>
 </html>

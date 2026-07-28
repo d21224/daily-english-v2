@@ -1,4 +1,4 @@
-import { openDatabase } from './storage.js?v=0.2.6';
+import { openDatabase } from './storage.js?v=0.2.12';
 import { calculateReward } from './rules.js?v=0.2.6';
 
 const STATE_KEY = 'current';
@@ -93,9 +93,10 @@ export async function settleActivity({ expectedEpoch, type, id, runId = '', comp
 export async function setTaskUnchecked({ expectedEpoch, type, id }) {
   const db = await openDatabase();
   return new Promise((resolve, reject) => {
-    const tx = db.transaction('state', 'readwrite');
-    const store = tx.objectStore('state');
-    const request = store.get(STATE_KEY);
+    const tx = db.transaction(['state','ledger'], 'readwrite');
+    const stateStore = tx.objectStore('state');
+    const ledgerStore = tx.objectStore('ledger');
+    const request = stateStore.get(STATE_KEY);
     let next;
     request.onsuccess = () => {
       next = request.result;
@@ -103,8 +104,17 @@ export async function setTaskUnchecked({ expectedEpoch, type, id }) {
       const located = locate(next, type, id);
       if (!located || type === 'listening') return tx.abort();
       located.item.done = false;
+      located.item.completedAt = '';
+      located.item.reward = {
+        points: 0,
+        baseEarned: 0,
+        bonusEarned: 0,
+        eligible: false,
+        completedAt: ''
+      };
+      ledgerStore.delete(activityKey(next.stateEpoch, type, id));
       next.revision += 1;
-      store.put(next, STATE_KEY);
+      stateStore.put(next, STATE_KEY);
     };
     tx.oncomplete = () => { db.close(); resolve(next); };
     tx.onabort = () => { db.close(); reject(new Error('과제 상태를 저장하지 못했어요.')); };

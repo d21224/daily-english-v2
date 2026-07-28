@@ -41,12 +41,37 @@ function silentWav(seconds = 2, sampleRate = 8000) {
 
   const setupTitle = await page.locator('#setupTitle').textContent();
   if (setupTitle !== '매일영어 설정') throw new Error(`첫 화면이 설정이 아닙니다: ${setupTitle}`);
+  if (await page.locator('#setupRefresh').count() !== 1 || await page.locator('#childRefresh').count() !== 1) throw new Error('설정·아이 화면 새로고침 버튼이 없습니다.');
+  if (await page.locator('#setupRefresh').getAttribute('aria-label') !== '앱 새로고침') throw new Error('새로고침 버튼의 접근성 이름이 없습니다.');
+  await page.click('#setupRefresh');
+  await page.waitForURL(url => new URL(url).searchParams.has('_refresh'));
+  await page.waitForSelector('#setupView:not(.hidden)');
+  if (await page.locator('#setupTitle').textContent() !== '매일영어 설정') throw new Error('새로고침 후 설정 화면이 유지되지 않았습니다.');
+  const newWeekPlacement = await page.evaluate(() => {
+    const panel = document.querySelector('#newWeekPanel');
+    const audio = document.querySelector('[aria-labelledby="audioHeading"]');
+    const management = document.querySelector('.management');
+    return {
+      exists: Boolean(panel),
+      beforeAudio: Boolean(panel && (panel.compareDocumentPosition(audio) & Node.DOCUMENT_POSITION_FOLLOWING)),
+      inManagement: Boolean(management?.contains(document.querySelector('#newWeekButton')))
+    };
+  });
+  if (!newWeekPlacement.exists || !newWeekPlacement.beforeAudio || newWeekPlacement.inManagement) throw new Error('새 주 시작 위치가 올바르지 않습니다.');
+  if (await page.locator('#backupToolsTitle').textContent() !== '백업 및 복원') throw new Error('백업 및 복원 그룹 제목이 없습니다.');
+  if (await page.locator('#exportBackup').textContent() !== '백업 저장') throw new Error('백업 저장 버튼 문구가 올바르지 않습니다.');
+  if (!(await page.locator('label:has(#importBackup)').textContent()).includes('백업에서 복원')) throw new Error('백업 복원 버튼 문구가 올바르지 않습니다.');
   if (await page.locator('[data-reward-base="dailyTask"]').inputValue() !== '100') throw new Error('일반 과제 기본 포인트가 올바르지 않습니다.');
   if (await page.locator('[data-reward-bonus="dailyTask"]').inputValue() !== '0') throw new Error('기존 포인트가 추가 포인트로 잘못 이전됐습니다.');
   if (await page.locator('[data-reward-time="dailyTask"]').isDisabled()) throw new Error('추가 포인트 입력 전에도 마감 시간을 먼저 바꿀 수 있어야 합니다.');
   if (!await page.locator('input[name="copyStyle"][value="child"]').isChecked()) throw new Error('아이 문구가 기본값이 아닙니다.');
   if (!await page.locator('#taskPraiseEnabled').isChecked()) throw new Error('과제 축하 카드가 기본 켜짐이 아닙니다.');
   if (await page.locator('#progressCelebrationThreshold').inputValue() !== '100') throw new Error('전체 진행률 축하 기본 기준이 100%가 아닙니다.');
+  for (const id of ['dayStartMinutes','dayStartSeconds','dayEndMinutes','dayEndSeconds']) {
+    const input = page.locator(`#${id}`);
+    if (await input.count() !== 1) throw new Error(`${id} 입력칸이 없습니다.`);
+    if (await input.getAttribute('inputmode') !== 'numeric') throw new Error(`${id}가 숫자 키보드를 사용하지 않습니다.`);
+  }
   const managementFontSizes = await page.evaluate(() => ({
     button: getComputedStyle(document.querySelector('#exportBackup')).fontSize,
     file: getComputedStyle(document.querySelector('label:has(#importBackup)')).fontSize
@@ -55,8 +80,71 @@ function silentWav(seconds = 2, sampleRate = 8000) {
   const preferenceAfterTheme = await page.evaluate(() => Boolean(document.querySelector('#themeEditor').compareDocumentPosition(document.querySelector('.copy-style-editor')) & Node.DOCUMENT_POSITION_FOLLOWING));
   if (!preferenceAfterTheme) throw new Error('아이 화면 표현 설정이 테마 아래에 있지 않습니다.');
 
+  await page.setInputFiles('#importBackup', {
+    name: 'invalid-backup.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from('{invalid')
+  });
+  await page.waitForSelector('#setupError:not(.hidden)');
+  if (!(await page.locator('#setupError').textContent()).includes('백업 파일을 확인할 수 없어요')) throw new Error('잘못된 백업 파일 안내가 명확하지 않습니다.');
+  await page.waitForFunction(() => document.querySelector('#importBackup').value === '');
+
+  const backupState = await page.evaluate(async () => new Promise((resolve, reject) => {
+    const request = indexedDB.open('dailyEnglishV2');
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const database = request.result;
+      const get = database.transaction('state').objectStore('state').get('current');
+      get.onerror = () => reject(get.error);
+      get.onsuccess = () => {
+        resolve(get.result);
+        database.close();
+      };
+    };
+  }));
+  backupState.copy.intro = '백업 복원 테스트';
+  const validBackup = {
+    name: 'valid-backup.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify({
+      app: '매일영어',
+      version: 2,
+      appVersion: '0.2.12',
+      exportedAt: new Date().toISOString(),
+      state: backupState
+    }))
+  };
+  await page.setInputFiles('#importBackup', validBackup);
+  await page.waitForSelector('#dialogLayer:not(.hidden)');
+  if (await page.locator('#dialogTitle').textContent() !== '백업으로 복원할까요?') throw new Error('백업 복원 확인창이 없습니다.');
+  await page.click('#dialogCancel');
+  await page.waitForFunction(() => document.querySelector('#importBackup').value === '');
+  if (await page.locator('#copyIntro').inputValue() === '백업 복원 테스트') throw new Error('복원 취소 후에도 상태가 변경됐습니다.');
+
+  await page.setInputFiles('#importBackup', validBackup);
+  await page.waitForSelector('#dialogLayer:not(.hidden)');
+  await page.click('#dialogConfirm');
+  await page.waitForFunction(() => document.querySelector('#copyIntro').value === '백업 복원 테스트');
+  if (!(await page.locator('#setupError').textContent()).includes('백업을 복원했어요')) throw new Error('백업 복원 성공 안내가 없습니다.');
+  await page.waitForFunction(() => document.querySelector('#importBackup').value === '');
+
   await page.setViewportSize({ width: 390, height: 844 });
   await page.locator('details.fold').first().locator(':scope > summary').click();
+  await page.locator('details.fold').nth(1).locator(':scope > summary').click();
+  const mobileFileWidths = await page.evaluate(() => {
+    const managementButton = document.querySelector('label:has(#importBackup)');
+    const management = managementButton.closest('.management');
+    const audioButton = document.querySelector('label:has(#audioFile)');
+    const audioRow = audioButton.closest('.file-row');
+    return {
+      managementButton: managementButton.getBoundingClientRect().width,
+      management: management.getBoundingClientRect().width,
+      audioButton: audioButton.getBoundingClientRect().width,
+      audioRow: audioRow.getBoundingClientRect().width
+    };
+  });
+  if (mobileFileWidths.managementButton >= mobileFileWidths.management - 1) throw new Error('백업 파일 불러오기 버튼이 관리 도구 전체 폭을 차지합니다.');
+  if (Math.abs(mobileFileWidths.audioButton - mobileFileWidths.audioRow) > 1) throw new Error('오디오 파일 선택 버튼의 모바일 전체 폭이 사라졌습니다.');
   await page.fill('[data-reward-time="dailyTask"]', '18:00');
   const setupMetrics = await page.evaluate(() => {
     const style = selector => getComputedStyle(document.querySelector(selector));
@@ -97,8 +185,10 @@ function silentWav(seconds = 2, sampleRate = 8000) {
   if (await addedWeeklyTask.inputValue() !== '' || await addedWeeklyTask.getAttribute('placeholder') !== '과제 이름') throw new Error('주간 과제 추가 입력칸이 빈 placeholder 상태가 아닙니다.');
   await page.locator('[data-delete-weekly]').nth((await page.locator('[data-delete-weekly]').count()) - 1).click();
 
-  await page.fill('#dayStart', '잘못된 값');
-  await page.fill('#dayEnd', '0:10');
+  await page.fill('#dayStartMinutes', '0');
+  await page.fill('#dayStartSeconds', '60');
+  await page.fill('#dayEndMinutes', '0');
+  await page.fill('#dayEndSeconds', '10');
   await page.fill('#dayTarget', '1');
   await page.click('#setupForm .primary');
   await page.waitForSelector('#setupError:not(.hidden)');
@@ -111,8 +201,10 @@ function silentWav(seconds = 2, sampleRate = 8000) {
     buffer: silentWav()
   });
   await page.waitForFunction(() => document.querySelector('#audioFileName')?.textContent.includes('test-silence.wav'));
-  await page.fill('#dayStart', '0:00');
-  await page.fill('#dayEnd', '0:01');
+  await page.fill('#dayStartMinutes', '0');
+  await page.fill('#dayStartSeconds', '00');
+  await page.fill('#dayEndMinutes', '0');
+  await page.fill('#dayEndSeconds', '01');
   await page.fill('#dayTarget', '1');
   await page.fill('[data-reward-bonus="weeklyTask"]', '200');
   await page.selectOption('[data-reward-day="weeklyTask"]', '6');
@@ -147,7 +239,7 @@ function silentWav(seconds = 2, sampleRate = 8000) {
   const restCardHeight = await firstRestCard.evaluate(element => element.getBoundingClientRect().height);
   if (restCardHeight > 60) throw new Error(`쉬는 날 카드가 불필요하게 큽니다: ${restCardHeight}px`);
   const footerCopy = await page.locator('#appFooter').textContent();
-  if (!footerCopy.includes('설정 보기') || !footerCopy.includes('매일영어 v0.2.10')) throw new Error(`하단 설정 및 버전 표기가 올바르지 않습니다: ${footerCopy}`);
+  if (!footerCopy.includes('설정 보기') || !footerCopy.includes('매일영어 v0.2.12')) throw new Error(`하단 설정 및 버전 표기가 올바르지 않습니다: ${footerCopy}`);
 
   const cards = await page.locator('.learning-card').count();
   if (cards !== 8) throw new Error(`학습 카드 수가 8개가 아닙니다: ${cards}`);
@@ -169,8 +261,10 @@ function silentWav(seconds = 2, sampleRate = 8000) {
   await page.waitForFunction(expected => Number(document.querySelector('#pointTotal')?.textContent.match(/(\d+)P/)?.[1] || 0) === expected, pointsBeforeTask + 700);
   weeklyToggle = page.locator('[data-task-type="weeklyTask"]').first();
   await weeklyToggle.uncheck();
+  await page.waitForFunction(expected => Number(document.querySelector('#pointTotal')?.textContent.match(/(\d+)P/)?.[1] || 0) === expected, pointsBeforeTask);
   weeklyToggle = page.locator('[data-task-type="weeklyTask"]').first();
   await weeklyToggle.check();
+  await page.waitForFunction(expected => Number(document.querySelector('#pointTotal')?.textContent.match(/(\d+)P/)?.[1] || 0) === expected, pointsBeforeTask + 700);
   await page.waitForSelector('#taskPraiseToast:not(.hidden)');
   if (await page.locator('#taskPraiseCard').textContent() !== '✅ 브라우저 과제 축하') throw new Error('일반 과제 완료에 과제 문구가 사용되지 않았습니다.');
   const toastPosition = await page.locator('#taskPraiseToast').evaluate(element => getComputedStyle(element).position);
@@ -191,6 +285,8 @@ function silentWav(seconds = 2, sampleRate = 8000) {
   await page.waitForSelector('#childView:not(.hidden)');
   const savedTitle = await page.locator('#childTitle').textContent();
   if (savedTitle !== '매일영어🤍') throw new Error(`새로고침 저장에 실패했습니다: ${savedTitle}`);
+  const savedPointTotal = Number((await page.locator('#pointTotal').textContent()).match(/(\d+)P/)?.[1] || 0);
+  if (savedPointTotal !== pointsBeforeTask + 700) throw new Error(`재체크 포인트가 새로고침 후 유지되지 않았습니다: ${savedPointTotal}`);
 
   await page.evaluate(async () => {
     const database = await new Promise((resolve, reject) => {
@@ -238,6 +334,8 @@ function silentWav(seconds = 2, sampleRate = 8000) {
   await page.click('#backToSetup');
   await page.waitForSelector('#setupView:not(.hidden)');
   if (await page.locator('#progressCelebrationThreshold').inputValue() !== '50') throw new Error('전체 축하 기준이 저장되지 않았습니다.');
+  if (await page.locator('#dayStartMinutes').inputValue() !== '0' || await page.locator('#dayStartSeconds').inputValue() !== '00') throw new Error('저장된 듣기 시작 구간이 분·초 입력칸에 복원되지 않았습니다.');
+  if (await page.locator('#dayEndMinutes').inputValue() !== '0' || await page.locator('#dayEndSeconds').inputValue() !== '01') throw new Error('저장된 듣기 종료 구간이 분·초 입력칸에 복원되지 않았습니다.');
   if (await page.locator('[data-reward-time="dailyTask"]').inputValue() !== '18:00') throw new Error('추가 포인트 입력 전에 바꾼 마감 시간이 저장되지 않았습니다.');
   if (await page.locator('[data-reward-time="weeklyTask"]').inputValue() !== '23:59') throw new Error('주간 과제 마감 시간이 저장되지 않았습니다.');
   await page.locator('details.fold').first().locator(':scope > summary').click();

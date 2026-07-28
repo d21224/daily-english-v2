@@ -1,4 +1,4 @@
-import { APP_VERSION, DAYS, DEFAULT_LISTENING_PRAISE, DEFAULT_TASK_PRAISE, DEFAULT_WEEKLY_TASKS, SCHEMA_VERSION } from './constants.js?v=0.2.10';
+import { APP_VERSION, DAYS, DEFAULT_LISTENING_PRAISE, DEFAULT_TASK_PRAISE, DEFAULT_WEEKLY_TASKS, SCHEMA_VERSION } from './constants.js?v=0.2.12';
 import { mondayKey } from './rules.js?v=0.2.6';
 
 export function createId(prefix = 'item') {
