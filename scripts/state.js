@@ -1,5 +1,5 @@
-import { APP_VERSION, DAYS, DEFAULT_LISTENING_PRAISE, DEFAULT_TASK_PRAISE, DEFAULT_WEEKLY_TASKS, SCHEMA_VERSION } from './constants.js?v=0.2.13';
-import { mondayKey } from './rules.js?v=0.2.13';
+import { APP_VERSION, DAYS, DEFAULT_LISTENING_PRAISE, DEFAULT_PROGRESS_PRAISE, DEFAULT_TASK_PRAISE, DEFAULT_WEEKLY_TASKS, SCHEMA_VERSION } from './constants.js?v=0.2.14';
+import { getProgress, mondayKey } from './rules.js?v=0.2.14';
 
 export function createId(prefix = 'item') {
   return `${prefix}-${crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`}`;
@@ -42,6 +42,9 @@ export function normalizePreferences(value) {
       ? next.praiseMessages.map(String) : [...DEFAULT_LISTENING_PRAISE];
   next.taskPraiseMessages = Array.isArray(next.taskPraiseMessages) && next.taskPraiseMessages.length
     ? next.taskPraiseMessages.map(String) : [...DEFAULT_TASK_PRAISE];
+  next.progressPraiseMessages = Array.isArray(next.progressPraiseMessages) && next.progressPraiseMessages.length
+    ? next.progressPraiseMessages.map(String) : [...DEFAULT_PROGRESS_PRAISE];
+  next.progressPraise = String(next.progressPraise || '');
   delete next.praiseMessages;
   return next;
 }
@@ -81,6 +84,8 @@ export function createDefaultState(now = new Date()) {
     preferences: { copyStyle:'child', taskPraiseEnabled:true, progressCelebrationThreshold:100 },
     listeningPraiseMessages: [...DEFAULT_LISTENING_PRAISE],
     taskPraiseMessages: [...DEFAULT_TASK_PRAISE],
+    progressPraiseMessages: [...DEFAULT_PROGRESS_PRAISE],
+    progressPraise: '',
     copy: { title: '매일영어🤍', intro: '오늘 할 일부터 하나씩 해보자.' },
     parentPasscode: '',
     audio: { name: '', saveToDevice: true }
@@ -154,6 +159,7 @@ export function resetForNewWeek(state, now = new Date()) {
     activeWeekStart: mondayKey(now),
     stateEpoch: createId('epoch'),
     revision: Number(state.revision) + 1,
+    progressPraise: '',
     days: state.days.map(day => ({
       ...day,
       count: 0,
@@ -164,4 +170,43 @@ export function resetForNewWeek(state, now = new Date()) {
     })),
     weeklyTasks: state.weeklyTasks.map(task => ({ ...task, done: false, completedAt: '', reward: emptyReward() }))
   };
+}
+
+export function selectProgressPraise(state, randomValue = Math.random()) {
+  const next = structuredClone(state);
+  if (next.progressPraise) return next;
+  const progress = getProgress(next);
+  const threshold = Number(next.preferences?.progressCelebrationThreshold) || 100;
+  if (!progress.total || progress.done / progress.total * 100 < threshold) return next;
+  const messages = next.progressPraiseMessages?.length ? next.progressPraiseMessages : DEFAULT_PROGRESS_PRAISE;
+  const index = Math.min(messages.length - 1, Math.max(0, Math.floor(Number(randomValue) * messages.length)));
+  next.progressPraise = String(messages[index] || DEFAULT_PROGRESS_PRAISE[0]);
+  next.revision = Number(next.revision || 0) + 1;
+  return next;
+}
+
+export function copyDaySetup(state, sourceIndex, targetIndexes) {
+  const next = structuredClone(state);
+  const source = next.days[sourceIndex];
+  const targets = new Set(targetIndexes.filter(index =>
+    Number.isInteger(index) && index >= 0 && index < next.days.length && index !== sourceIndex
+  ));
+
+  targets.forEach(index => {
+    const target = next.days[index];
+    target.segment = source.segment;
+    target.target = source.target;
+    target.count = 0;
+    target.completedAt = '';
+    target.praise = '';
+    target.reward = emptyReward();
+    target.tasks = source.tasks.map(task => ({
+      ...structuredClone(task),
+      id: createId(`daily-${index}`),
+      done: false,
+      completedAt: '',
+      reward: emptyReward()
+    }));
+  });
+  return next;
 }

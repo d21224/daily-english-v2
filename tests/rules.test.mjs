@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createDefaultState, resetForNewWeek } from '../scripts/state.js';
+import { copyDaySetup, createDefaultState, resetForNewWeek, selectProgressPraise } from '../scripts/state.js';
 import { calculateReward, getProgress, mondayKey, parseSegment, rewardCopy, totalPoints } from '../scripts/rules.js';
 
 test('하이픈과 en dash 구간을 모두 파싱한다', () => {
@@ -29,6 +29,64 @@ test('체크 해제된 과제에 과거 보상 기록이 남아 있어도 포인
   ];
 
   assert.equal(totalPoints(state), 200);
+});
+
+test('선택한 요일에만 듣기와 과제를 복사하고 해당 진행을 초기화한다', () => {
+  const state = createDefaultState(new Date(2026, 6, 27));
+  state.days[0].segment = '1:00-1:20';
+  state.days[0].target = 3;
+  state.days[0].tasks = [
+    { id:'source-task', label:'ORT 1권', done:true, completedAt:'source', reward:{points:100} }
+  ];
+  state.days[1].count = 2;
+  state.days[1].completedAt = 'old';
+  state.days[1].reward = { points:100 };
+  state.days[1].tasks = [
+    { id:'old-tuesday', label:'기존 화요일 과제', done:true, completedAt:'old', reward:{points:100} }
+  ];
+  state.days[2].segment = '9:00-9:10';
+  state.days[2].tasks = [
+    { id:'keep-wednesday', label:'수요일 유지', done:true, completedAt:'keep', reward:{points:100} }
+  ];
+  const weeklyBefore = structuredClone(state.weeklyTasks);
+  const rewardsBefore = structuredClone(state.rewards);
+
+  const next = copyDaySetup(state, 0, [1, 3]);
+
+  assert.equal(next.days[1].segment, '1:00-1:20');
+  assert.equal(next.days[1].target, 3);
+  assert.equal(next.days[1].count, 0);
+  assert.equal(next.days[1].completedAt, '');
+  assert.equal(next.days[1].reward.points, 0);
+  assert.deepEqual(next.days[1].tasks.map(task => task.label), ['ORT 1권']);
+  assert.equal(next.days[1].tasks[0].done, false);
+  assert.equal(next.days[1].tasks[0].completedAt, '');
+  assert.equal(next.days[1].tasks[0].reward.points, 0);
+  assert.notEqual(next.days[1].tasks[0].id, 'source-task');
+  assert.equal(next.days[3].segment, '1:00-1:20');
+  assert.equal(next.days[2].segment, '9:00-9:10');
+  assert.equal(next.days[2].tasks[0].label, '수요일 유지');
+  assert.deepEqual(next.weeklyTasks, weeklyBefore);
+  assert.deepEqual(next.rewards, rewardsBefore);
+  assert.equal(state.days[1].tasks[0].label, '기존 화요일 과제');
+});
+
+test('주간 목표 응원 문구는 기준 달성 후 한 번만 선택하고 새 주에 초기화한다', () => {
+  const state = createDefaultState(new Date(2026, 6, 27));
+  state.preferences.progressCelebrationThreshold = 50;
+  state.progressPraiseMessages = ['첫 문구', '둘째 문구'];
+  state.days[0].target = 1;
+  state.days[0].count = 1;
+  state.days[1].target = 1;
+  state.weeklyTasks = [];
+
+  const selected = selectProgressPraise(state, 0.75);
+
+  assert.equal(selected.progressPraise, '둘째 문구');
+  assert.equal(selectProgressPraise(selected, 0).progressPraise, '둘째 문구');
+  const reset = resetForNewWeek(selected, new Date(2026, 7, 3));
+  assert.equal(reset.progressPraise, '');
+  assert.deepEqual(reset.progressPraiseMessages, ['첫 문구', '둘째 문구']);
 });
 
 test('일일 보상은 기본 포인트를 항상 지급하고 마감 전 보너스를 더한다', () => {

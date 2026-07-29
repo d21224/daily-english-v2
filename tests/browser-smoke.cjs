@@ -41,6 +41,26 @@ function silentWav(seconds = 2, sampleRate = 8000) {
 
   const setupTitle = await page.locator('#setupTitle').textContent();
   if (setupTitle !== '매일영어 설정') throw new Error(`첫 화면이 설정이 아닙니다: ${setupTitle}`);
+  if (await page.locator('#audioStatus').count() !== 0) throw new Error('헤더의 중복 오디오 상태가 남아 있습니다.');
+  if (await page.locator('#parentPasscode').evaluate(node => Boolean(node.closest('.management'))) !== true) throw new Error('설정 암호가 관리 도구에 있지 않습니다.');
+  const groupOrder = await page.locator('[data-customize-group]').evaluateAll(nodes => nodes.map(node => node.dataset.customizeGroup));
+  if (groupOrder.join(',') !== 'points,theme,basic,progress,praise') throw new Error(`화면 꾸미기 순서가 올바르지 않습니다: ${groupOrder}`);
+  if (await page.locator('#progressCelebrationThreshold').evaluate(node => node.closest('[data-customize-group]')?.dataset.customizeGroup) !== 'praise') throw new Error('주간 목표 응원 시점이 응원 설정에 있지 않습니다.');
+  if (await page.locator('#progressPraiseMessages').count() !== 1) throw new Error('주간 목표 응원 문구 편집기가 없습니다.');
+  const encouragementCards = page.locator('[data-customize-group="praise"] .encouragement-card');
+  if (await encouragementCards.count() !== 3) throw new Error('응원 설정 하위 카드가 3개가 아닙니다.');
+  const encouragementEditLabels = await page.locator('[data-customize-group="praise"] .message-fold summary').allTextContents();
+  if (encouragementEditLabels.some(label => label.trim() !== '문구 10개 편집')) {
+    throw new Error(`응원 문구 편집 라벨이 통일되지 않았습니다: ${encouragementEditLabels.join(', ')}`);
+  }
+  if (await page.locator('.setup-submit-bar').count() !== 1) throw new Error('고정 저장 영역이 없습니다.');
+  const stickyMetrics = await page.evaluate(() => {
+    const bar = document.querySelector('.setup-submit-bar').getBoundingClientRect();
+    const button = document.querySelector('.setup-submit-bar .primary').getBoundingClientRect();
+    return { bottom: Math.round(innerHeight - bar.bottom), buttonWidth: Math.round(button.width), viewport: innerWidth };
+  });
+  if (stickyMetrics.bottom !== 0) throw new Error('설정 저장 영역이 화면 하단에 고정되지 않았습니다.');
+  if (stickyMetrics.buttonWidth >= stickyMetrics.viewport) throw new Error('고정 버튼에 좌우 여백이 없습니다.');
   if (await page.locator('#setupRefresh').count() !== 1 || await page.locator('#childRefresh').count() !== 1) throw new Error('설정·아이 화면 새로고침 버튼이 없습니다.');
   if (await page.locator('#setupRefresh').getAttribute('aria-label') !== '앱 새로고침') throw new Error('새로고침 버튼의 접근성 이름이 없습니다.');
   await page.click('#setupRefresh');
@@ -109,7 +129,7 @@ function silentWav(seconds = 2, sampleRate = 8000) {
     buffer: Buffer.from(JSON.stringify({
       app: '매일영어',
       version: 2,
-      appVersion: '0.2.13',
+      appVersion: '0.2.14',
       exportedAt: new Date().toISOString(),
       state: backupState
     }))
@@ -127,6 +147,34 @@ function silentWav(seconds = 2, sampleRate = 8000) {
   await page.waitForFunction(() => document.querySelector('#copyIntro').value === '백업 복원 테스트');
   if (!(await page.locator('#setupError').textContent()).includes('백업을 복원했어요')) throw new Error('백업 복원 성공 안내가 없습니다.');
   await page.waitForFunction(() => document.querySelector('#importBackup').value === '');
+
+  await page.click('[data-day-tab="0"]');
+  await page.fill('#dayStartMinutes', '1');
+  await page.fill('#dayStartSeconds', '0');
+  await page.fill('#dayEndMinutes', '1');
+  await page.fill('#dayEndSeconds', '20');
+  await page.fill('#dayTarget', '3');
+  await page.click('#copyDaySetup');
+  await page.waitForSelector('#dialogLayer:not(.hidden)');
+  if (await page.locator('[data-copy-day="0"]').count() !== 0) throw new Error('원본 요일이 복사 대상에 포함됐습니다.');
+  if (!await page.locator('#dialogConfirm').isDisabled()) throw new Error('요일 미선택 상태에서 복사 버튼이 활성화됐습니다.');
+  await page.check('[data-copy-day="1"]');
+  await page.check('[data-copy-day="3"]');
+  if (await page.locator('#dialogConfirm').isDisabled()) throw new Error('요일 선택 후 복사 버튼이 활성화되지 않았습니다.');
+  await page.click('#dialogCancel');
+  await page.click('[data-day-tab="1"]');
+  if (await page.locator('#dayTarget').inputValue() === '3') throw new Error('복사 취소 후에도 초안이 변경됐습니다.');
+
+  await page.click('[data-day-tab="0"]');
+  await page.click('#copyDaySetup');
+  await page.check('[data-copy-day="1"]');
+  await page.check('[data-copy-day="3"]');
+  await page.click('#dialogConfirm');
+  await page.click('[data-day-tab="1"]');
+  if (await page.locator('#dayTarget').inputValue() !== '3') throw new Error('화요일에 목표 횟수가 복사되지 않았습니다.');
+  if (!(await page.locator('#setupError').textContent()).includes('화·목요일에 복사했어요')) throw new Error('복사 완료 안내가 없습니다.');
+  await page.click('#setupRefresh');
+  await page.waitForSelector('#setupView:not(.hidden)');
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.locator('details.fold').first().locator(':scope > summary').click();
@@ -214,6 +262,8 @@ function silentWav(seconds = 2, sampleRate = 8000) {
   await page.fill('#listeningPraiseMessages', '🎧 브라우저 듣기 축하');
   await page.locator('details.message-fold').nth(1).locator('summary').click();
   await page.fill('#taskPraiseMessages', '✅ 브라우저 과제 축하');
+  await page.locator('details.message-fold').nth(2).locator('summary').click();
+  await page.fill('#progressPraiseMessages', '🌟 브라우저 주간 목표 응원');
   await page.check('input[name="theme"][value="dark"]');
   const darkHeadingColor = await page.locator('#audioHeading').evaluate(element => getComputedStyle(element).color);
   if (darkHeadingColor !== 'rgb(237, 247, 255)') throw new Error(`다크 테마 소제목 대비가 올바르지 않습니다: ${darkHeadingColor}`);
@@ -239,7 +289,7 @@ function silentWav(seconds = 2, sampleRate = 8000) {
   const restCardHeight = await firstRestCard.evaluate(element => element.getBoundingClientRect().height);
   if (restCardHeight > 60) throw new Error(`쉬는 날 카드가 불필요하게 큽니다: ${restCardHeight}px`);
   const footerCopy = await page.locator('#appFooter').textContent();
-  if (!footerCopy.includes('설정 보기') || !footerCopy.includes('매일영어 v0.2.13')) throw new Error(`하단 설정 및 버전 표기가 올바르지 않습니다: ${footerCopy}`);
+  if (!footerCopy.includes('설정 보기') || !footerCopy.includes('매일영어 v0.2.14')) throw new Error(`하단 설정 및 버전 표기가 올바르지 않습니다: ${footerCopy}`);
 
   const cards = await page.locator('.learning-card').count();
   if (cards !== 8) throw new Error(`학습 카드 수가 8개가 아닙니다: ${cards}`);
@@ -273,7 +323,7 @@ function silentWav(seconds = 2, sampleRate = 8000) {
   if (completedWeeklyBadge.startsWith('+')) throw new Error(`완료 포인트 합계에 +가 남아 있습니다: ${completedWeeklyBadge}`);
   await page.waitForSelector('#celebration:not(.hidden)');
   const celebrationTitle = await page.locator('#celebrationTitle').textContent();
-  if (!celebrationTitle.includes('50%')) throw new Error(`설정한 전체 축하 기준 문구가 아닙니다: ${celebrationTitle}`);
+  if (celebrationTitle !== '🌟 브라우저 주간 목표 응원') throw new Error(`설정한 주간 목표 응원 문구가 아닙니다: ${celebrationTitle}`);
   if (!await page.locator('#celebration img').evaluate(element => element.classList.contains('hidden'))) throw new Error('다크 테마에서 캐릭터가 표시됩니다.');
   await page.waitForTimeout(100);
   const repeatedPoints = await page.locator('#pointTotal').textContent();
@@ -285,6 +335,7 @@ function silentWav(seconds = 2, sampleRate = 8000) {
   await page.waitForSelector('#childView:not(.hidden)');
   const savedTitle = await page.locator('#childTitle').textContent();
   if (savedTitle !== '매일영어🤍') throw new Error(`새로고침 저장에 실패했습니다: ${savedTitle}`);
+  if (await page.locator('#celebrationTitle').textContent() !== celebrationTitle) throw new Error('주간 목표 응원 문구가 새로고침 후 바뀌었습니다.');
   const savedPointTotal = Number((await page.locator('#pointTotal').textContent()).match(/(\d+)P/)?.[1] || 0);
   if (savedPointTotal !== pointsBeforeTask + 700) throw new Error(`재체크 포인트가 새로고침 후 유지되지 않았습니다: ${savedPointTotal}`);
 
@@ -341,6 +392,7 @@ function silentWav(seconds = 2, sampleRate = 8000) {
   await page.locator('details.fold').first().locator(':scope > summary').click();
   await page.locator('label.preference-card:has(input[name="copyStyle"][value="simple"])').click();
   await page.uncheck('#taskPraiseEnabled');
+  if (!await page.locator('#taskPraiseEditor').evaluate(element => element.classList.contains('is-disabled'))) throw new Error('과제 응원 끄기 후 문구 편집기가 비활성 표시되지 않았습니다.');
   await page.click('#setupForm .primary');
   await page.waitForSelector('#childView:not(.hidden)');
   if (await page.locator('#progressLabel').textContent() !== '이번 주 진행률') throw new Error('간단 문구로 전환되지 않았습니다.');

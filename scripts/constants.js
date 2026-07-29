@@ -1,5 +1,5 @@
 export const APP_NAME = '매일영어';
-export const APP_VERSION = '0.2.13';
+export const APP_VERSION = '0.2.14';
 export const SCHEMA_VERSION = 3;
 export const DB_NAME = 'dailyEnglishV2';
 export const DB_VERSION = 1;
@@ -30,5 +30,17 @@ export const DEFAULT_TASK_PRAISE = [
   '✨ 오늘도 반짝반짝 노력했어!',
   '🚀 멋지게 해냈어! 다음 미션도 힘내자!',
   '🌈 차근차근 해내는 모습이 최고야!'
+];
+export const DEFAULT_PROGRESS_PRAISE = [
+  '🏆 이번 주 목표 달성! 정말 멋져!',
+  '🎉 이번 주에도 멋진 기록을 만들었어!',
+  '🌟 꾸준한 노력이 반짝이는 결과가 되었어!',
+  '💪 하나씩 해낸 네 힘이 정말 대단해!',
+  '🌈 이번 주 목표를 멋지게 해냈어!',
+  '👏 차근차근 끝까지 해낸 너를 응원해!',
+  '✨ 이번 주의 멋진 도전, 성공!',
+  '🥳 목표를 이룬 오늘을 마음껏 축하해!',
+  '🚀 네 실력이 이번 주에도 쑥 자랐어!',
+  '💙 다음 도전도 지금처럼 멋지게 해낼 거야!'
 ];
 export const DEFAULT_WEEKLY_TASKS = ['영어 읽기 영상 찍기','워크시트','롤플레이 영상 찍기'];

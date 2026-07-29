@@ -1,5 +1,5 @@
-import { openDatabase } from './storage.js?v=0.2.13';
-import { calculateReward } from './rules.js?v=0.2.13';
+import { openDatabase } from './storage.js?v=0.2.14';
+import { calculateReward } from './rules.js?v=0.2.14';
 
 const STATE_KEY = 'current';
 

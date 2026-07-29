@@ -1,9 +1,9 @@
-import { APP_NAME, APP_VERSION, DAYS, DAY_SHORT, DEFAULT_LISTENING_PRAISE, DEFAULT_TASK_PRAISE } from './constants.js?v=0.2.13';
+import { APP_NAME, APP_VERSION, DAYS, DAY_SHORT, DEFAULT_LISTENING_PRAISE, DEFAULT_PROGRESS_PRAISE, DEFAULT_TASK_PRAISE } from './constants.js?v=0.2.14';
 import { AudioController } from './audio-controller.js?v=0.2.2';
-import { clearAudio, clearV2, copyLegacyAudioIfAvailable, loadAudio, loadState, replaceState, saveAudio, saveState } from './storage.js?v=0.2.13';
-import { createDefaultState, createId, migrateV2, resetForNewWeek } from './state.js?v=0.2.13';
-import { dayIndex, getProgress, mondayKey, parseClock, parseSegment, rewardCopy, totalPoints, validateState } from './rules.js?v=0.2.13';
-import { setTaskUnchecked, settleActivity } from './settlement.js?v=0.2.13';
+import { clearAudio, clearV2, copyLegacyAudioIfAvailable, loadAudio, loadState, replaceState, saveAudio, saveState } from './storage.js?v=0.2.14';
+import { copyDaySetup, createDefaultState, createId, migrateV2, resetForNewWeek, selectProgressPraise } from './state.js?v=0.2.14';
+import { dayIndex, getProgress, mondayKey, parseClock, parseSegment, rewardCopy, totalPoints, validateState } from './rules.js?v=0.2.14';
+import { setTaskUnchecked, settleActivity } from './settlement.js?v=0.2.14';
 
 const $ = id => document.getElementById(id);
 const clone = value => structuredClone(value);
@@ -63,8 +63,9 @@ function setAudioSource(record) {
 
 function renderAudioStatus() {
   const connected = Boolean(audioUrl);
-  $('audioFileName').textContent = connected ? state.audio.name : state.audio.name ? `${state.audio.name} · 다시 연결 필요` : '선택된 파일 없음';
-  $('audioStatus').textContent = connected ? `● ${state.audio.name} · 이 기기에 연결됨` : state.audio.name ? `오디오 연결이 필요해요 · 이전 파일: ${state.audio.name}` : '';
+  $('audioFileName').textContent = connected
+    ? `✓ ${state.audio.name || '오디오 연결됨'}${state.audio.saveToDevice ? ' · 이 기기에 저장됨' : ''}`
+    : '오디오 파일을 선택해 주세요';
   $('saveAudio').checked = state.audio.saveToDevice !== false;
 }
 
@@ -117,7 +118,7 @@ function renderDayEditor() {
     <div class="task-editor">${day.tasks.map(task=>`<div class="task-input-row"><input data-daily-task="${task.id}" maxlength="100" placeholder="과제 이름" value="${escapeAttribute(task.label)}"><button class="delete-button" type="button" data-delete-daily="${task.id}" aria-label="${task.label?`${escapeAttribute(task.label)} 삭제`:'과제 삭제'}">삭제</button></div>`).join('')}</div>
     <div class="editor-actions">
       <button class="small-button" type="button" id="addDailyTask">+ 매일 과제 추가</button>
-      <button class="small-button" type="button" id="applyDayToAll">${day.name} 설정을 다른 날에 적용</button>
+      <button class="small-button" type="button" id="copyDaySetup">다른 요일에 복사</button>
     </div>`;
 }
 
@@ -142,8 +143,10 @@ function renderSetup() {
   $('copyIntro').value = draft.copy.intro;
   $('listeningPraiseMessages').value = draft.listeningPraiseMessages.join('\n');
   $('taskPraiseMessages').value = draft.taskPraiseMessages.join('\n');
+  $('progressPraiseMessages').value = draft.progressPraiseMessages.join('\n');
   document.querySelector(`input[name="copyStyle"][value="${draft.preferences.copyStyle}"]`).checked = true;
   $('taskPraiseEnabled').checked = draft.preferences.taskPraiseEnabled;
+  updateTaskPraiseEditor();
   $('progressCelebrationThreshold').value = String(draft.preferences.progressCelebrationThreshold);
   $('parentPasscode').value = draft.parentPasscode;
   $('setupError').textContent = '';
@@ -184,8 +187,10 @@ function captureSetup() {
   draft.copy.intro = safeText($('copyIntro').value, 160);
   draft.listeningPraiseMessages = $('listeningPraiseMessages').value.split('\n').map(value=>safeText(value,160)).filter(Boolean);
   draft.taskPraiseMessages = $('taskPraiseMessages').value.split('\n').map(value=>safeText(value,160)).filter(Boolean);
+  draft.progressPraiseMessages = $('progressPraiseMessages').value.split('\n').map(value=>safeText(value,160)).filter(Boolean);
   if (!draft.listeningPraiseMessages.length) draft.listeningPraiseMessages = [...DEFAULT_LISTENING_PRAISE];
   if (!draft.taskPraiseMessages.length) draft.taskPraiseMessages = [...DEFAULT_TASK_PRAISE];
+  if (!draft.progressPraiseMessages.length) draft.progressPraiseMessages = [...DEFAULT_PROGRESS_PRAISE];
   draft.parentPasscode = safeText($('parentPasscode').value, 40);
   draft.preferences = {
     copyStyle: document.querySelector('input[name="copyStyle"]:checked')?.value === 'simple' ? 'simple' : 'child',
@@ -257,6 +262,13 @@ function renderDayCard(day, index, pending) {
 
 function renderChild() {
   applyTheme(state.theme);
+  if (!state.progressPraise) {
+    const withProgressPraise = selectProgressPraise(state);
+    if (withProgressPraise.progressPraise) {
+      state = withProgressPraise;
+      saveState(state).catch(() => {});
+    }
+  }
   const pending = rolloverPending();
   $('childTitle').textContent = state.copy.title;
   $('childIntro').textContent = state.copy.intro;
@@ -276,12 +288,8 @@ function renderChild() {
   $('progressBar').value = progress.done;
   const points = totalPoints(state);
   $('pointTotal').textContent = points ? `🎁 이번 주 적립 포인트 ${points}P` : '';
-  const progressPercent = progress.total > 0 ? progress.done / progress.total * 100 : 0;
-  const celebrationThreshold = Number(state.preferences.progressCelebrationThreshold) || 100;
-  show($('celebration'), progress.total > 0 && progressPercent >= celebrationThreshold);
-  $('celebrationTitle').textContent = celebrationThreshold === 100
-    ? '🏆 이번 주 할 일을 모두 끝냈어요!'
-    : `🎉 이번 주 목표 ${celebrationThreshold}%를 달성했어요!`;
+  show($('celebration'), Boolean(state.progressPraise));
+  $('celebrationTitle').textContent = state.progressPraise || '🏆 이번 주 목표를 달성했어요!';
   $('celebration').querySelector('img').classList.toggle('hidden', state.theme !== 'cloud');
   show($('rolloverNotice'), pending);
   $('rolloverNotice').innerHTML = pending ? `새 주 학습표를 준비하려면 보호자 확인이 필요해요. <button type="button" class="small-button" data-confirm-rollover>보호자 확인</button>` : '';
@@ -355,6 +363,14 @@ function showTaskPraise() {
   taskPraiseTimer = setTimeout(() => show(toast, false), 2000);
 }
 
+function updateTaskPraiseEditor() {
+  const editor = $('taskPraiseEditor');
+  if (!editor) return;
+  const disabled = !$('taskPraiseEnabled').checked;
+  editor.classList.toggle('is-disabled', disabled);
+  editor.setAttribute('aria-disabled', String(disabled));
+}
+
 async function chooseAudio(file) {
   if (!file) return;
   const oldRecord = await loadAudio().catch(()=>null);
@@ -371,7 +387,7 @@ async function chooseAudio(file) {
     if (oldRecord?.blob) setAudioSource(oldRecord);
     state.audio.saveToDevice = false;
     await saveState(state).catch(()=>{});
-    $('audioStatus').textContent = `연결됨: ${file.name} · 기기 저장에는 실패했어요.`;
+    $('audioFileName').textContent = `✓ ${state.audio.name || file.name} · 기기 저장 실패`;
   }
 }
 
@@ -381,11 +397,30 @@ function openDialog({ title, message, field = '', confirm = '확인', trigger = 
   $('dialogMessage').textContent = message;
   $('dialogField').innerHTML = field;
   $('dialogConfirm').textContent = confirm;
+  $('dialogConfirm').disabled = false;
   $('dialogError').textContent = '';
   show($('dialogError'), false);
   show($('dialogLayer'), true);
   setTimeout(()=>($('dialogField').querySelector('input') || $('dialogConfirm')).focus(), 0);
   return new Promise(resolve => { dialogResolver = resolve; });
+}
+
+function openDayCopyDialog(trigger) {
+  const choices = DAY_SHORT.map((label, index) => index === selectedDay ? '' : `
+    <label class="day-copy-choice">
+      <input type="checkbox" data-copy-day="${index}">
+      <span>${label}요일</span>
+    </label>
+  `).join('');
+  const promise = openDialog({
+    title: `${draft.days[selectedDay].name} 설정 복사`,
+    message: '선택한 요일의 기존 설정과 학습 기록이 새 내용으로 바뀌어요.',
+    field: `<div class="day-copy-grid">${choices}</div>`,
+    confirm: '선택한 요일에 복사',
+    trigger
+  });
+  $('dialogConfirm').disabled = true;
+  return promise;
 }
 
 function closeDialog(value) {
@@ -521,23 +556,26 @@ $('dayTabs').addEventListener('click', event => {
   renderDayEditor();
 });
 
-$('dayEditor').addEventListener('click', event => {
+$('dayEditor').addEventListener('click', async event => {
   if (event.target.id === 'addDailyTask') {
     captureCurrentDay();
     draft.days[selectedDay].tasks.push({ id:createId('daily'), label:'', done:false, completedAt:'', reward:{points:0,eligible:false,completedAt:''} });
     return renderDayEditor();
   }
-  if (event.target.id === 'applyDayToAll') {
+  if (event.target.id === 'copyDaySetup') {
     captureCurrentDay();
-    const source = draft.days[selectedDay];
-    draft.days.forEach((day,index)=>{
-      if (index === selectedDay) return;
-      day.segment = source.segment;
-      day.target = source.target;
-      day.tasks = source.tasks.map(task=>({ ...clone(task), id:createId(`daily-${index}`), done:false, completedAt:'', reward:{points:0,eligible:false,completedAt:''} }));
-    });
-    $('setupError').textContent = `${source.name} 듣기와 과제를 다른 요일에 적용했어요.`;
+    const sourceIndex = selectedDay;
+    const sourceName = draft.days[sourceIndex].name;
+    const okay = await openDayCopyDialog(event.target);
+    if (!okay) return;
+    const targets = [...document.querySelectorAll('[data-copy-day]:checked')]
+      .map(input => Number(input.dataset.copyDay));
+    draft = copyDaySetup(draft, sourceIndex, targets);
+    const targetNames = targets.map(index => DAY_SHORT[index]).join('·');
+    $('setupError').textContent = `${sourceName} 설정을 ${targetNames}요일에 복사했어요.`;
     show($('setupError'), true);
+    renderDayEditor();
+    return;
   }
   const remove = event.target.closest('[data-delete-daily]');
   if (remove) {
@@ -566,6 +604,7 @@ $('addWeeklyTask').addEventListener('click', () => {
 $('themeEditor').addEventListener('change', event => {
   if (event.target.name === 'theme') applyTheme(event.target.value);
 });
+$('taskPraiseEnabled').addEventListener('change', updateTaskPraiseEditor);
 
 $('setupForm').addEventListener('submit', async event => {
   event.preventDefault();
@@ -633,6 +672,10 @@ $('fatalReset').addEventListener('click', async () => { await clearV2(); locatio
 $('retryApp').addEventListener('click', () => location.reload());
 $('dialogCancel').addEventListener('click', () => closeDialog(false));
 $('dialogConfirm').addEventListener('click', () => closeDialog(true));
+$('dialogField').addEventListener('change', event => {
+  if (!event.target.matches('[data-copy-day]')) return;
+  $('dialogConfirm').disabled = !document.querySelector('[data-copy-day]:checked');
+});
 $('dialogLayer').addEventListener('click', event => { if (event.target === $('dialogLayer')) closeDialog(false); });
 document.addEventListener('keydown', event => { if (event.key === 'Escape' && !$('dialogLayer').classList.contains('hidden')) closeDialog(false); });
 window.addEventListener('beforeunload', () => { audioController.invalidate(); if (audioUrl) URL.revokeObjectURL(audioUrl); });
