@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { copyDaySetup, createDefaultState, resetForNewWeek, selectProgressPraise } from '../scripts/state.js';
-import { calculateReward, getProgress, mondayKey, parseSegment, rewardCopy, totalPoints } from '../scripts/rules.js';
+import { calculateReward, getProgress, mondayKey, parseSegment, rewardCopy, totalPoints, validateState } from '../scripts/rules.js';
 
 test('하이픈과 en dash 구간을 모두 파싱한다', () => {
   assert.deepEqual(parseSegment('10:11-10:20'), { start: 611, end: 620 });
@@ -138,4 +138,15 @@ test('새 주 시작은 설정을 유지하고 진행만 초기화한다', () =>
   assert.equal(reset.weeklyTasks[0].label,'유지할 과제');
   assert.equal(reset.activeWeekStart,mondayKey(new Date(2026,7,3)));
   assert.notEqual(reset.stateEpoch,state.stateEpoch);
+});
+
+test('중복 과제 ID와 잘못된 보상 규칙은 저장 전에 거부한다', () => {
+  const duplicate = createDefaultState();
+  duplicate.days[0].tasks = [{id:'same',label:'A',done:false,reward:{points:0}}];
+  duplicate.weeklyTasks[0].id = 'same';
+  assert.throws(() => validateState(duplicate), /과제 ID/);
+
+  const invalidReward = createDefaultState();
+  delete invalidReward.rewards.dailyTask;
+  assert.throws(() => validateState(invalidReward), /포인트/);
 });

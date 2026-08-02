@@ -1,4 +1,4 @@
-import { DAY_SHORT } from './constants.js?v=0.2.6';
+import { DAY_SHORT } from './constants.js?v=0.2.15';
 
 export function localDateKey(date = new Date()) {
   const y = date.getFullYear();
@@ -136,9 +136,29 @@ export function totalPoints(state) {
 export function validateState(state) {
   if (!state || state.schemaVersion !== 3 || !Array.isArray(state.days) || state.days.length !== 7) throw new Error('저장된 학습표 형식이 올바르지 않아요.');
   if (!Array.isArray(state.weeklyTasks) || !state.rewards || !state.copy) throw new Error('저장된 과제 또는 화면 설정이 올바르지 않아요.');
+  for (const key of ['listening','dailyTask','weeklyTask']) {
+    const rule = state.rewards[key];
+    if (!rule || !Number.isFinite(Number(rule.basePoints)) || !Number.isFinite(Number(rule.bonusPoints)) || Number(rule.basePoints) < 0 || Number(rule.bonusPoints) < 0) {
+      throw new Error('포인트 설정이 올바르지 않아요.');
+    }
+    if (parseClock(rule.bonusTime ?? '') === undefined) throw new Error('포인트 마감 시간이 올바르지 않아요.');
+  }
+  const ids = new Set();
   for (const day of state.days) {
     if (!day.id || !Array.isArray(day.tasks) || Number(day.target) < 0) throw new Error('요일별 학습 설정이 올바르지 않아요.');
+    if (ids.has(day.id)) throw new Error('요일 또는 과제 ID가 중복되어 있어요.');
+    ids.add(day.id);
     if (Number(day.target) > 0 && !parseSegment(day.segment)) throw new Error(`${day.name} 듣기 구간 형식이 올바르지 않아요.`);
+    for (const task of day.tasks) {
+      if (!task?.id || typeof task.label !== 'string') throw new Error('매일 과제 형식이 올바르지 않아요.');
+      if (ids.has(task.id)) throw new Error('과제 ID가 중복되어 있어요.');
+      ids.add(task.id);
+    }
+  }
+  for (const task of state.weeklyTasks) {
+    if (!task?.id || typeof task.label !== 'string') throw new Error('주간 과제 형식이 올바르지 않아요.');
+    if (ids.has(task.id)) throw new Error('과제 ID가 중복되어 있어요.');
+    ids.add(task.id);
   }
   return state;
 }

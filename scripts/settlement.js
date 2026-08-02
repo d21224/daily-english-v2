@@ -1,5 +1,5 @@
-import { openDatabase } from './storage.js?v=0.2.14';
-import { calculateReward } from './rules.js?v=0.2.14';
+import { openDatabase } from './storage.js?v=0.2.15';
+import { calculateReward } from './rules.js?v=0.2.15';
 
 const STATE_KEY = 'current';
 
@@ -7,17 +7,23 @@ function activityKey(epoch, type, id) {
   return `${epoch}:${type}:${id}`;
 }
 
-function locate(state, type, id) {
+export function locateActivity(state, type, id) {
   if (type === 'listening') {
     const dayIndex = state.days.findIndex(day => day.id === id);
     return dayIndex < 0 ? null : { item: state.days[dayIndex], dayIndex };
   }
-  for (let dayIndex = 0; dayIndex < state.days.length; dayIndex += 1) {
-    const task = state.days[dayIndex].tasks.find(value => value.id === id);
-    if (task) return { item: task, dayIndex };
+  if (type === 'dailyTask') {
+    for (let dayIndex = 0; dayIndex < state.days.length; dayIndex += 1) {
+      const task = state.days[dayIndex].tasks.find(value => value.id === id);
+      if (task) return { item: task, dayIndex };
+    }
+    return null;
   }
-  const task = state.weeklyTasks.find(value => value.id === id);
-  return task ? { item: task, dayIndex: null } : null;
+  if (type === 'weeklyTask') {
+    const task = state.weeklyTasks.find(value => value.id === id);
+    return task ? { item: task, dayIndex: null } : null;
+  }
+  return null;
 }
 
 export async function settleActivity({ expectedEpoch, type, id, runId = '', completedAt = new Date(), praise = '' }) {
@@ -36,7 +42,7 @@ export async function settleActivity({ expectedEpoch, type, id, runId = '', comp
         tx.abort();
         return;
       }
-      const located = locate(state, type, id);
+      const located = locateActivity(state, type, id);
       if (!located) {
         outcome = { status: 'missing' };
         tx.abort();
@@ -68,7 +74,12 @@ export async function settleActivity({ expectedEpoch, type, id, runId = '', comp
         } else {
           item.done = true;
         }
-        const rule = state.rewards[type];
+        const rule = state.rewards?.[type];
+        if (!rule) {
+          outcome = { status: 'invalid-rule' };
+          tx.abort();
+          return;
+        }
         const earned = calculateReward(type, dayIndex, rule, date);
         item.completedAt = date.toISOString();
         item.reward = { ...earned, eligible: earned.bonusEarned > 0, completedAt: item.completedAt };
@@ -101,7 +112,7 @@ export async function setTaskUnchecked({ expectedEpoch, type, id }) {
     request.onsuccess = () => {
       next = request.result;
       if (!next || next.stateEpoch !== expectedEpoch) return tx.abort();
-      const located = locate(next, type, id);
+      const located = locateActivity(next, type, id);
       if (!located || type === 'listening') return tx.abort();
       located.item.done = false;
       located.item.completedAt = '';

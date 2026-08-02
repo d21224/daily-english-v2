@@ -1,9 +1,10 @@
-import { APP_NAME, APP_VERSION, DAYS, DAY_SHORT, DEFAULT_LISTENING_PRAISE, DEFAULT_PROGRESS_PRAISE, DEFAULT_TASK_PRAISE } from './constants.js?v=0.2.14';
-import { AudioController } from './audio-controller.js?v=0.2.2';
-import { clearAudio, clearV2, copyLegacyAudioIfAvailable, loadAudio, loadState, replaceState, saveAudio, saveState } from './storage.js?v=0.2.14';
-import { copyDaySetup, createDefaultState, createId, migrateV2, resetForNewWeek, selectProgressPraise } from './state.js?v=0.2.14';
-import { dayIndex, getProgress, mondayKey, parseClock, parseSegment, rewardCopy, totalPoints, validateState } from './rules.js?v=0.2.14';
-import { setTaskUnchecked, settleActivity } from './settlement.js?v=0.2.14';
+import { APP_VERSION, DAYS, DAY_SHORT, DEFAULT_LISTENING_PRAISE, DEFAULT_PROGRESS_PRAISE, DEFAULT_TASK_PRAISE } from './constants.js?v=0.2.15';
+import { AudioController } from './audio-controller.js?v=0.2.15';
+import { clearAudio, clearV2, copyLegacyAudioIfAvailable, loadAudio, loadState, replaceState, saveAudio, saveState } from './storage.js?v=0.2.15';
+import { copyDaySetup, createDefaultState, createId, resetForNewWeek, selectProgressPraise } from './state.js?v=0.2.15';
+import { dayIndex, getProgress, mondayKey, parseClock, parseSegment, rewardCopy, totalPoints } from './rules.js?v=0.2.15';
+import { setTaskUnchecked, settleActivity } from './settlement.js?v=0.2.15';
+import { createBackupPayload, prepareImportedState } from './backup.js?v=0.2.15';
 
 const $ = id => document.getElementById(id);
 const clone = value => structuredClone(value);
@@ -11,6 +12,7 @@ let state;
 let draft;
 let selectedDay = 0;
 let audioUrl = '';
+let currentAudioRecord = null;
 let dialogTrigger = null;
 let dialogResolver = null;
 let bootTimer;
@@ -56,9 +58,36 @@ function rolloverPending() {
 function setAudioSource(record) {
   if (audioUrl) URL.revokeObjectURL(audioUrl);
   audioUrl = record?.blob ? URL.createObjectURL(record.blob) : '';
+  currentAudioRecord = record?.blob ? { blob: record.blob, name: String(record.name || state.audio.name || 'audio.mp3'), type: String(record.type || record.blob.type || '') } : null;
   player.src = audioUrl;
   setupPlayer.src = audioUrl;
   if (record?.name) state.audio.name = record.name;
+}
+
+function audioFileFromRecord(record) {
+  if (!record?.blob) return null;
+  return record.blob instanceof File && record.blob.name === record.name
+    ? record.blob
+    : new File([record.blob], record.name || 'audio.mp3', { type: record.type || record.blob.type || 'audio/mpeg' });
+}
+
+async function persistAudioPreference(saveToDevice) {
+  if (!saveToDevice) {
+    await clearAudio();
+    return;
+  }
+  if (currentAudioRecord?.blob) {
+    await saveAudio(audioFileFromRecord(currentAudioRecord));
+    return;
+  }
+  const stored = await loadAudio();
+  if (!stored?.blob) throw new Error('이 기기에 저장할 오디오 파일을 먼저 선택해 주세요.');
+  setAudioSource(stored);
+}
+
+async function restoreStoredAudio(record) {
+  if (record?.blob) await saveAudio(audioFileFromRecord(record));
+  else await clearAudio();
 }
 
 function renderAudioStatus() {
@@ -374,6 +403,8 @@ function updateTaskPraiseEditor() {
 async function chooseAudio(file) {
   if (!file) return;
   const oldRecord = await loadAudio().catch(()=>null);
+  const oldSessionRecord = currentAudioRecord;
+  const oldAudioState = clone(state.audio);
   const record = { blob: file, name: file.name };
   setAudioSource(record);
   state.audio = { name: file.name, saveToDevice: $('saveAudio').checked };
@@ -384,10 +415,13 @@ async function chooseAudio(file) {
     renderAudioStatus();
     if (state.screen === 'child') renderChild();
   } catch (error) {
-    if (oldRecord?.blob) setAudioSource(oldRecord);
-    state.audio.saveToDevice = false;
+    await restoreStoredAudio(oldRecord).catch(()=>{});
+    setAudioSource(oldSessionRecord?.blob ? oldSessionRecord : oldRecord);
+    state.audio = oldAudioState;
     await saveState(state).catch(()=>{});
-    $('audioFileName').textContent = `✓ ${state.audio.name || file.name} · 기기 저장 실패`;
+    renderAudioStatus();
+    $('setupError').textContent = '오디오를 저장하지 못했어요. 저장 공간을 확인한 뒤 다시 시도해 주세요.';
+    show($('setupError'), true);
   }
 }
 
@@ -463,14 +497,10 @@ function renderCurrentScreen() {
   else renderChild();
 }
 
-function backupPayload() {
-  return { app: APP_NAME, version: 2, appVersion: APP_VERSION, exportedAt: new Date().toISOString(), state };
-}
-
 function exportBackup() {
   const now = new Date();
   const stamp = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}_${String(now.getHours()).padStart(2,'0')}-${String(now.getMinutes()).padStart(2,'0')}-${String(now.getSeconds()).padStart(2,'0')}`;
-  const url = URL.createObjectURL(new Blob([JSON.stringify(backupPayload(),null,2)],{type:'application/json'}));
+  const url = URL.createObjectURL(new Blob([JSON.stringify(createBackupPayload(state, now),null,2)],{type:'application/json'}));
   const link = document.createElement('a');
   link.href = url;
   link.download = `매일영어-설정과진도-${stamp}.json`;
@@ -480,9 +510,7 @@ function exportBackup() {
 
 async function prepareBackupState(file) {
   const parsed = JSON.parse(await file.text());
-  if (parsed?.app !== APP_NAME || parsed?.version !== 2) throw new Error('invalid-backup');
-  const imported = clone(parsed.state);
-  return validateState(imported.schemaVersion === 2 ? migrateV2(imported) : imported);
+  return prepareImportedState(parsed, state);
 }
 
 async function importBackupFile(file, input) {
@@ -493,7 +521,7 @@ async function importBackupFile(file, input) {
     const confirmed = await openDialog({
       title: '백업으로 복원할까요?',
       message: '현재 설정과 학습 기록이 백업 파일의 내용으로 바뀝니다. 오디오는 바뀌지 않아요.',
-      confirmText: '복원하기',
+      confirm: '복원하기',
       trigger: input?.closest('label') || input
     });
     if (!confirmed) return;
@@ -615,9 +643,17 @@ $('setupForm').addEventListener('submit', async event => {
     draft.stateEpoch = createId('epoch');
     draft.revision = Number(state.revision) + 1;
     draft.screen = 'child';
+    const previousState = state;
+    const previousStoredAudio = await loadAudio().catch(()=>null);
     state = clone(draft);
-    if (!state.audio.saveToDevice) await clearAudio();
-    await saveState(state);
+    try {
+      await persistAudioPreference(state.audio.saveToDevice);
+      await saveState(state);
+    } catch (error) {
+      await restoreStoredAudio(previousStoredAudio).catch(()=>{});
+      state = previousState;
+      throw error;
+    }
     renderCurrentScreen();
   } catch (error) {
     $('setupError').textContent = error.message;
@@ -668,7 +704,12 @@ $('resetApp').addEventListener('click', async event => {
   await clearV2();
   location.reload();
 });
-$('fatalReset').addEventListener('click', async () => { await clearV2(); location.reload(); });
+$('fatalReset').addEventListener('click', async event => {
+  const okay = await openDialog({title:'설정을 초기화할까요?',message:'v0.2 설정, 진도, 저장 오디오를 이 기기에서 삭제합니다. v0.1 데이터는 유지됩니다.',confirm:'초기화',trigger:event.currentTarget});
+  if (!okay) return;
+  await clearV2();
+  location.reload();
+});
 $('retryApp').addEventListener('click', () => location.reload());
 $('dialogCancel').addEventListener('click', () => closeDialog(false));
 $('dialogConfirm').addEventListener('click', () => closeDialog(true));
