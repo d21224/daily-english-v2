@@ -1,4 +1,4 @@
-import { DAY_SHORT } from './constants.js?v=0.2.15';
+import { DAY_SHORT } from './constants.js?v=0.2.16';
 
 export function localDateKey(date = new Date()) {
   const y = date.getFullYear();
@@ -112,6 +112,10 @@ export function getActiveItems(state) {
   });
   state.weeklyTasks.forEach(task => items.push({ type: 'weeklyTask', id: task.id, done: Boolean(task.done) }));
   return items;
+}
+
+export function hasActiveListening(state) {
+  return state.days.some(day => Number(day.target) > 0);
 }
 
 export function getProgress(state) {

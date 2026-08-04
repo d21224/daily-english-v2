@@ -1,6 +1,6 @@
-import { APP_NAME, APP_VERSION } from './constants.js?v=0.2.15';
-import { migrateV2, normalizePreferences } from './state.js?v=0.2.15';
-import { validateState } from './rules.js?v=0.2.15';
+import { APP_NAME, APP_VERSION } from './constants.js?v=0.2.16';
+import { migrateV2, normalizePreferences } from './state.js?v=0.2.16';
+import { validateState } from './rules.js?v=0.2.16';
 
 export function createBackupPayload(state, now = new Date()) {
   const safeState = structuredClone(state);

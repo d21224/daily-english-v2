@@ -8,7 +8,7 @@
   <link rel="icon" href="../assets/app-icon-512.png">
   <link rel="apple-touch-icon" href="../assets/apple-touch-icon.png">
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="stylesheet" href="styles/app.css?v=0.2.15">
+  <link rel="stylesheet" href="styles/app.css?v=0.2.16">
 </head>
 <body data-theme="cloud">
   <div id="boot" class="boot hidden" role="status" aria-live="polite">
@@ -160,7 +160,7 @@
       </header>
       <section id="rolloverNotice" class="notice warning hidden"></section>
       <section id="childAudioNotice" class="notice hidden"></section>
-      <section class="progress-card" aria-labelledby="progressLabel">
+      <section id="progressCard" class="progress-card" aria-labelledby="progressLabel">
         <div><strong id="progressLabel">이번 주 진행률</strong><span id="progressText">0 / 0 완료</span></div>
         <progress id="progressBar" value="0" max="1"></progress>
         <p id="pointTotal"></p>
@@ -205,6 +205,6 @@
     </section>
   </div>
 
-  <script type="module" src="scripts/app.js?v=0.2.15"></script>
+  <script type="module" src="scripts/app.js?v=0.2.16"></script>
 </body>
 </html>

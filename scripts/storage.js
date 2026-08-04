@@ -1,9 +1,24 @@
-import { DB_NAME, DB_VERSION, V1_AUDIO_DB, V1_STATE_KEY } from './constants.js?v=0.2.15';
-import { createDefaultState, migrateV1, migrateV2, normalizePreferences } from './state.js?v=0.2.15';
-import { validateState } from './rules.js?v=0.2.15';
+import { DB_NAME, DB_VERSION, V1_AUDIO_DB, V1_STATE_KEY } from './constants.js?v=0.2.16';
+import { createDefaultState, migrateV1, migrateV2, normalizePreferences } from './state.js?v=0.2.16';
+import { validateState } from './rules.js?v=0.2.16';
 
 const STATE_KEY = 'current';
 const AUDIO_KEY = 'current';
+
+export class StateConflictError extends Error {
+  constructor() {
+    super('다른 화면에서 학습 기록이 변경됐어요.');
+    this.name = 'StateConflictError';
+    this.code = 'STATE_CONFLICT';
+  }
+}
+
+export function assertExpectedState(current, expected) {
+  if (!expected) return;
+  if (!current || current.stateEpoch !== expected.stateEpoch || Number(current.revision) !== Number(expected.revision)) {
+    throw new StateConflictError();
+  }
+}
 
 export function openDatabase() {
   return new Promise((resolve, reject) => {
@@ -47,15 +62,27 @@ export async function loadState() {
   return initial;
 }
 
-export async function saveState(state) {
+export async function saveState(state, expected = null) {
   validateState(state);
   const db = await openDatabase();
   return new Promise((resolve, reject) => {
     const tx = db.transaction('state', 'readwrite');
-    tx.objectStore('state').put(structuredClone(state), STATE_KEY);
+    const store = tx.objectStore('state');
+    const get = store.get(STATE_KEY);
+    let conflict = null;
+    get.onerror = () => tx.abort();
+    get.onsuccess = () => {
+      try {
+        assertExpectedState(get.result, expected);
+        store.put(structuredClone(state), STATE_KEY);
+      } catch (error) {
+        conflict = error;
+        tx.abort();
+      }
+    };
     tx.oncomplete = () => { db.close(); resolve(state); };
     tx.onerror = () => { const error = tx.error; db.close(); reject(error); };
-    tx.onabort = () => { const error = tx.error; db.close(); reject(error); };
+    tx.onabort = () => { const error = conflict || tx.error; db.close(); reject(error); };
   });
 }
 
@@ -69,6 +96,29 @@ export async function replaceState(state) {
     tx.objectStore('ledger').clear();
     tx.oncomplete = () => { db.close(); resolve(normalized); };
     tx.onerror = () => { const error = tx.error; db.close(); reject(error); };
+  });
+}
+
+export async function pruneLedgerForEpoch(stateEpoch) {
+  const prefix = `${stateEpoch}:`;
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('ledger', 'readwrite');
+    const request = tx.objectStore('ledger').openCursor();
+    let deleted = 0;
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) return;
+      if (!String(cursor.primaryKey).startsWith(prefix)) {
+        cursor.delete();
+        deleted += 1;
+      }
+      cursor.continue();
+    };
+    request.onerror = () => tx.abort();
+    tx.oncomplete = () => { db.close(); resolve(deleted); };
+    tx.onerror = () => { const error = tx.error; db.close(); reject(error); };
+    tx.onabort = () => { const error = tx.error; db.close(); reject(error); };
   });
 }
 

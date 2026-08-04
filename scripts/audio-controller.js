@@ -1,4 +1,4 @@
-import { parseSegment } from './rules.js?v=0.2.15';
+import { parseSegment } from './rules.js?v=0.2.16';
 
 export class AudioController {
   constructor(player, callbacks = {}) {

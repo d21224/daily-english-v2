@@ -39,6 +39,149 @@ function silentWav(seconds = 2, sampleRate = 8000) {
   await page.waitForSelector('#setupView:not(.hidden)');
   await page.screenshot({ path:'/tmp/daily-english-v02-setup.png', fullPage:true });
 
+  const conflictContext = await browser.newContext({ viewport: { width: 820, height: 1180 } });
+  const latestPage = await conflictContext.newPage();
+  const stalePage = await conflictContext.newPage();
+  latestPage.setDefaultTimeout(5000);
+  stalePage.setDefaultTimeout(5000);
+  await latestPage.goto('http://127.0.0.1:4173/v0.2/daily-english.html?conflict=latest', { waitUntil:'networkidle' });
+  await stalePage.goto('http://127.0.0.1:4173/v0.2/daily-english.html?conflict=stale', { waitUntil:'networkidle' });
+  await Promise.all([
+    latestPage.waitForSelector('#setupView:not(.hidden)'),
+    stalePage.waitForSelector('#setupView:not(.hidden)')
+  ]);
+  await latestPage.evaluate(async () => new Promise((resolve, reject) => {
+    const request = indexedDB.open('dailyEnglishV2');
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const database = request.result;
+      const tx = database.transaction('state', 'readwrite');
+      const store = tx.objectStore('state');
+      const get = store.get('current');
+      get.onsuccess = () => {
+        const current = get.result;
+        current.copy.title = '다른 화면의 최신 제목';
+        current.revision += 1;
+        store.put(current, 'current');
+      };
+      tx.oncomplete = () => { database.close(); resolve(); };
+      tx.onerror = () => { database.close(); reject(tx.error); };
+    };
+  }));
+  await stalePage.locator('#copyTitle').evaluate(element => { element.closest('details').open = true; });
+  await stalePage.fill('#copyTitle', '오래된 화면의 제목');
+  await stalePage.uncheck('#saveAudio');
+  await stalePage.click('#setupForm .primary');
+  await stalePage.waitForTimeout(300);
+  const conflictUi = await stalePage.evaluate(() => ({
+    setupHidden: document.querySelector('#setupView').classList.contains('hidden'),
+    childHidden: document.querySelector('#childView').classList.contains('hidden'),
+    error: document.querySelector('#setupError')?.textContent || ''
+  }));
+  if (!conflictUi.error.includes('최신 내용으로 다시 불러왔어요')) throw new Error(`저장 충돌 안내가 없습니다: ${JSON.stringify(conflictUi)}`);
+  if (await stalePage.locator('#copyTitle').inputValue() !== '다른 화면의 최신 제목') throw new Error('충돌 후 최신 설정을 다시 불러오지 않았습니다.');
+  const titleAfterConflict = await stalePage.evaluate(async () => new Promise((resolve, reject) => {
+    const request = indexedDB.open('dailyEnglishV2');
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const database = request.result;
+      const get = database.transaction('state').objectStore('state').get('current');
+      get.onsuccess = () => { database.close(); resolve(get.result.copy.title); };
+      get.onerror = () => { database.close(); reject(get.error); };
+    };
+  }));
+  if (titleAfterConflict !== '다른 화면의 최신 제목') throw new Error('오래된 화면이 최신 설정을 덮어썼습니다.');
+  await conflictContext.close();
+
+  const emptyContext = await browser.newContext({ viewport: { width:390, height:844 } });
+  const emptyPage = await emptyContext.newPage();
+  await emptyPage.goto('http://127.0.0.1:4173/v0.2/daily-english.html?empty-state=1', { waitUntil:'networkidle' });
+  await emptyPage.waitForSelector('#setupView:not(.hidden)');
+  const setEmptyFixture = mode => emptyPage.evaluate(async fixtureMode => new Promise((resolve, reject) => {
+    const request = indexedDB.open('dailyEnglishV2');
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const database = request.result;
+      const tx = database.transaction(['state','audio'], 'readwrite');
+      const stateStore = tx.objectStore('state');
+      const get = stateStore.get('current');
+      get.onsuccess = () => {
+        const current = get.result;
+        current.screen = 'child';
+        current.weeklyTasks = [];
+        current.progressPraise = '이 문구는 빈 학습표에 보이면 안 돼요.';
+        current.audio = { name:'', saveToDevice:false };
+        current.days.forEach(day => {
+          day.target = 0;
+          day.segment = '';
+          day.count = 0;
+          day.tasks = [];
+        });
+        if (fixtureMode === 'task') current.days[0].tasks = [{id:'task-only',label:'단어 읽기',done:false,completedAt:'',reward:{points:0}}];
+        if (fixtureMode === 'listening') {
+          current.days[0].target = 1;
+          current.days[0].segment = '0:00-0:10';
+        }
+        current.revision += 1;
+        stateStore.put(current, 'current');
+        tx.objectStore('audio').delete('current');
+      };
+      tx.oncomplete = () => { database.close(); resolve(); };
+      tx.onerror = () => { database.close(); reject(tx.error); };
+    };
+  }), mode);
+
+  await setEmptyFixture('empty');
+  await emptyPage.reload({ waitUntil:'networkidle' });
+  await emptyPage.waitForSelector('#childView:not(.hidden)');
+  if (await emptyPage.getByText('이번 주 학습이 아직 없어요 ☁️', {exact:true}).count() !== 1) throw new Error('활성 학습 0개 안내가 없습니다.');
+  if (!await emptyPage.locator('.progress-card').evaluate(element => element.classList.contains('hidden'))) throw new Error('빈 학습표에 진행률이 표시됩니다.');
+  if (!await emptyPage.locator('#celebration').evaluate(element => element.classList.contains('hidden'))) throw new Error('빈 학습표에 전체 목표 응원이 표시됩니다.');
+  if (!await emptyPage.locator('#childAudioNotice').evaluate(element => element.classList.contains('hidden'))) throw new Error('빈 학습표에 오디오 연결 안내가 표시됩니다.');
+  for (const theme of ['cloud','light','dark']) {
+    await emptyPage.evaluate(async nextTheme => new Promise((resolve, reject) => {
+      const request = indexedDB.open('dailyEnglishV2');
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const database = request.result;
+        const tx = database.transaction('state', 'readwrite');
+        const store = tx.objectStore('state');
+        const get = store.get('current');
+        get.onsuccess = () => {
+          const current = get.result;
+          current.theme = nextTheme;
+          current.revision += 1;
+          store.put(current, 'current');
+        };
+        tx.oncomplete = () => { database.close(); resolve(); };
+        tx.onerror = () => { database.close(); reject(tx.error); };
+      };
+    }), theme);
+    await emptyPage.reload({ waitUntil:'networkidle' });
+    await emptyPage.waitForSelector('.empty-learning');
+    const emptyMetrics = await emptyPage.locator('.empty-learning').evaluate(element => ({
+      color:getComputedStyle(element).color,
+      background:getComputedStyle(element).backgroundColor,
+      overflow:document.documentElement.scrollWidth - innerWidth
+    }));
+    if (emptyMetrics.color === emptyMetrics.background) throw new Error(`${theme} 테마 빈 상태의 글자 대비가 없습니다.`);
+    if (emptyMetrics.overflow > 0) throw new Error(`${theme} 테마 빈 상태에서 가로 넘침이 발생합니다.`);
+  }
+  await emptyPage.screenshot({ path:'/tmp/daily-english-v0216-empty.png', fullPage:true });
+
+  await setEmptyFixture('task');
+  await emptyPage.reload({ waitUntil:'networkidle' });
+  await emptyPage.waitForSelector('#childView:not(.hidden)');
+  if (await emptyPage.getByText('단어 읽기', {exact:true}).count() !== 1) throw new Error('과제 전용 학습표가 표시되지 않습니다.');
+  if (!await emptyPage.locator('#childAudioNotice').evaluate(element => element.classList.contains('hidden'))) throw new Error('과제 전용 학습표에 오디오 연결 안내가 표시됩니다.');
+
+  await setEmptyFixture('listening');
+  await emptyPage.reload({ waitUntil:'networkidle' });
+  await emptyPage.waitForSelector('#childView:not(.hidden)');
+  if (!(await emptyPage.locator('#childAudioNotice').textContent()).includes('오디오 연결이 필요해요')) throw new Error('듣기 학습표의 오디오 연결 안내가 없습니다.');
+  if (!await emptyPage.locator('[data-play-day="0"]').isDisabled()) throw new Error('오디오가 없는데 듣기 버튼이 활성화됐습니다.');
+  await emptyContext.close();
+
   const setupTitle = await page.locator('#setupTitle').textContent();
   if (setupTitle !== '매일영어 설정') throw new Error(`첫 화면이 설정이 아닙니다: ${setupTitle}`);
   if (await page.locator('#audioStatus').count() !== 0) throw new Error('헤더의 중복 오디오 상태가 남아 있습니다.');
@@ -122,6 +265,34 @@ function silentWav(seconds = 2, sampleRate = 8000) {
       };
     };
   }));
+  const currentEpoch = backupState.stateEpoch;
+  await page.evaluate(async epoch => new Promise((resolve, reject) => {
+    const request = indexedDB.open('dailyEnglishV2');
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const database = request.result;
+      const tx = database.transaction('ledger', 'readwrite');
+      const ledger = tx.objectStore('ledger');
+      ledger.put({ key:`${epoch}:dailyTask:keep`, type:'dailyTask', id:'keep' });
+      ledger.put({ key:'old-epoch:dailyTask:remove', type:'dailyTask', id:'remove' });
+      tx.oncomplete = () => { database.close(); resolve(); };
+      tx.onerror = () => { database.close(); reject(tx.error); };
+    };
+  }), currentEpoch);
+  await page.reload({ waitUntil:'networkidle' });
+  await page.waitForSelector('#setupView:not(.hidden)');
+  const ledgerKeysAfterReload = await page.evaluate(async () => new Promise((resolve, reject) => {
+    const request = indexedDB.open('dailyEnglishV2');
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const database = request.result;
+      const get = database.transaction('ledger').objectStore('ledger').getAllKeys();
+      get.onsuccess = () => { database.close(); resolve(get.result); };
+      get.onerror = () => { database.close(); reject(get.error); };
+    };
+  }));
+  if (!ledgerKeysAfterReload.includes(`${currentEpoch}:dailyTask:keep`)) throw new Error('현재 주 ledger가 새로고침 후 삭제됐습니다.');
+  if (ledgerKeysAfterReload.includes('old-epoch:dailyTask:remove')) throw new Error('이전 주 ledger가 새로고침 후 정리되지 않았습니다.');
   backupState.copy.intro = '백업 복원 테스트';
   const validBackup = {
     name: 'valid-backup.json',
@@ -129,7 +300,7 @@ function silentWav(seconds = 2, sampleRate = 8000) {
     buffer: Buffer.from(JSON.stringify({
       app: '매일영어',
       version: 2,
-      appVersion: '0.2.15',
+      appVersion: '0.2.16',
       exportedAt: new Date().toISOString(),
       state: backupState
     }))
@@ -147,6 +318,17 @@ function silentWav(seconds = 2, sampleRate = 8000) {
   await page.waitForFunction(() => document.querySelector('#copyIntro').value === '백업 복원 테스트');
   if (!(await page.locator('#setupError').textContent()).includes('백업을 복원했어요')) throw new Error('백업 복원 성공 안내가 없습니다.');
   await page.waitForFunction(() => document.querySelector('#importBackup').value === '');
+  const ledgerAfterImport = await page.evaluate(async () => new Promise((resolve, reject) => {
+    const request = indexedDB.open('dailyEnglishV2');
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const database = request.result;
+      const get = database.transaction('ledger').objectStore('ledger').getAllKeys();
+      get.onsuccess = () => { database.close(); resolve(get.result); };
+      get.onerror = () => { database.close(); reject(get.error); };
+    };
+  }));
+  if (ledgerAfterImport.length !== 0) throw new Error(`백업 복원 후 ledger가 비워지지 않았습니다: ${ledgerAfterImport.join(',')}`);
 
   await page.click('[data-day-tab="0"]');
   await page.fill('#dayStartMinutes', '1');
@@ -289,7 +471,7 @@ function silentWav(seconds = 2, sampleRate = 8000) {
   const restCardHeight = await firstRestCard.evaluate(element => element.getBoundingClientRect().height);
   if (restCardHeight > 60) throw new Error(`쉬는 날 카드가 불필요하게 큽니다: ${restCardHeight}px`);
   const footerCopy = await page.locator('#appFooter').textContent();
-  if (!footerCopy.includes('설정 보기') || !footerCopy.includes('매일영어 v0.2.15')) throw new Error(`하단 설정 및 버전 표기가 올바르지 않습니다: ${footerCopy}`);
+  if (!footerCopy.includes('설정 보기') || !footerCopy.includes('매일영어 v0.2.16')) throw new Error(`하단 설정 및 버전 표기가 올바르지 않습니다: ${footerCopy}`);
 
   const cards = await page.locator('.learning-card').count();
   if (cards !== 8) throw new Error(`학습 카드 수가 8개가 아닙니다: ${cards}`);

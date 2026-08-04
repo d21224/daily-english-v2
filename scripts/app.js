@@ -1,10 +1,10 @@
-import { APP_VERSION, DAYS, DAY_SHORT, DEFAULT_LISTENING_PRAISE, DEFAULT_PROGRESS_PRAISE, DEFAULT_TASK_PRAISE } from './constants.js?v=0.2.15';
-import { AudioController } from './audio-controller.js?v=0.2.15';
-import { clearAudio, clearV2, copyLegacyAudioIfAvailable, loadAudio, loadState, replaceState, saveAudio, saveState } from './storage.js?v=0.2.15';
-import { copyDaySetup, createDefaultState, createId, resetForNewWeek, selectProgressPraise } from './state.js?v=0.2.15';
-import { dayIndex, getProgress, mondayKey, parseClock, parseSegment, rewardCopy, totalPoints } from './rules.js?v=0.2.15';
-import { setTaskUnchecked, settleActivity } from './settlement.js?v=0.2.15';
-import { createBackupPayload, prepareImportedState } from './backup.js?v=0.2.15';
+import { APP_VERSION, DAYS, DAY_SHORT, DEFAULT_LISTENING_PRAISE, DEFAULT_PROGRESS_PRAISE, DEFAULT_TASK_PRAISE } from './constants.js?v=0.2.16';
+import { AudioController } from './audio-controller.js?v=0.2.16';
+import { clearAudio, clearV2, copyLegacyAudioIfAvailable, loadAudio, loadState, pruneLedgerForEpoch, replaceState, saveAudio, saveState } from './storage.js?v=0.2.16';
+import { copyDaySetup, createDefaultState, createId, resetForNewWeek, selectProgressPraise } from './state.js?v=0.2.16';
+import { dayIndex, getProgress, hasActiveListening, mondayKey, parseClock, parseSegment, rewardCopy, totalPoints } from './rules.js?v=0.2.16';
+import { setTaskUnchecked, settleActivity } from './settlement.js?v=0.2.16';
+import { createBackupPayload, prepareImportedState } from './backup.js?v=0.2.16';
 
 const $ = id => document.getElementById(id);
 const clone = value => structuredClone(value);
@@ -88,6 +88,29 @@ async function persistAudioPreference(saveToDevice) {
 async function restoreStoredAudio(record) {
   if (record?.blob) await saveAudio(audioFileFromRecord(record));
   else await clearAudio();
+}
+
+async function persistState(next, previous = state) {
+  const candidate = clone(next);
+  candidate.revision = Number(previous.revision || 0) + 1;
+  return saveState(candidate, {
+    revision: Number(previous.revision || 0),
+    stateEpoch: previous.stateEpoch
+  });
+}
+
+async function recoverFromConflict(error, target = 'setup') {
+  if (error?.code !== 'STATE_CONFLICT') return false;
+  state = await loadState();
+  draft = clone(state);
+  renderCurrentScreen();
+  const message = '다른 화면에서 학습 기록이 변경되어 최신 내용으로 다시 불러왔어요.';
+  if (target === 'child' && state.screen === 'child') showChildNotice(message, false);
+  else if (state.screen === 'setup') {
+    $('setupError').textContent = message;
+    show($('setupError'), true);
+  }
+  return true;
 }
 
 function renderAudioStatus() {
@@ -291,18 +314,22 @@ function renderDayCard(day, index, pending) {
 
 function renderChild() {
   applyTheme(state.theme);
-  if (!state.progressPraise) {
+  const progress = getProgress(state);
+  const empty = progress.total === 0;
+  if (!empty && !state.progressPraise) {
+    const previous = state;
     const withProgressPraise = selectProgressPraise(state);
     if (withProgressPraise.progressPraise) {
       state = withProgressPraise;
-      saveState(state).catch(() => {});
+      persistState(withProgressPraise, previous)
+        .then(saved => { state = saved; })
+        .catch(error => recoverFromConflict(error, 'child').catch(()=>{}));
     }
   }
   const pending = rolloverPending();
   $('childTitle').textContent = state.copy.title;
   $('childIntro').textContent = state.copy.intro;
   show($('childIntro'), Boolean(state.copy.intro));
-  const progress = getProgress(state);
   const childCopy = state.preferences.copyStyle === 'child';
   $('progressLabel').textContent = childCopy ? `⭐ 이번 주 ${progress.total}개 중 ${progress.done}개 했어요` : '이번 주 진행률';
   const remaining = Math.max(0, progress.total - progress.done);
@@ -317,14 +344,17 @@ function renderChild() {
   $('progressBar').value = progress.done;
   const points = totalPoints(state);
   $('pointTotal').textContent = points ? `🎁 이번 주 적립 포인트 ${points}P` : '';
-  show($('celebration'), Boolean(state.progressPraise));
+  show($('progressCard'), !empty);
+  show($('celebration'), !empty && Boolean(state.progressPraise));
   $('celebrationTitle').textContent = state.progressPraise || '🏆 이번 주 목표를 달성했어요!';
   $('celebration').querySelector('img').classList.toggle('hidden', state.theme !== 'cloud');
   show($('rolloverNotice'), pending);
   $('rolloverNotice').innerHTML = pending ? `새 주 학습표를 준비하려면 보호자 확인이 필요해요. <button type="button" class="small-button" data-confirm-rollover>보호자 확인</button>` : '';
-  showChildNotice(!audioUrl ? '오디오 연결이 필요해요. 보호자에게 알려 주세요.' : '', false);
+  showChildNotice(hasActiveListening(state) && !audioUrl ? '오디오 연결이 필요해요. 보호자에게 알려 주세요.' : '', false);
   const weekly = `<article class="learning-card weekly"><div class="card-head"><span class="day-badge">주간 과제</span></div><div class="daily-tasks">${state.weeklyTasks.length ? state.weeklyTasks.map(task=>taskHtml(task,'weeklyTask',pending)).join('') : '<p class="segment">설정된 주간 과제가 없어요.</p>'}</div></article>`;
-  $('learningGrid').innerHTML = state.days.map((day,index)=>renderDayCard(day,index,pending)).join('') + weekly;
+  $('learningGrid').innerHTML = empty
+    ? '<div class="empty-learning">이번 주 학습이 아직 없어요 ☁️</div>'
+    : state.days.map((day,index)=>renderDayCard(day,index,pending)).join('') + weekly;
 }
 
 function showChildNotice(message, error = false) {
@@ -404,21 +434,22 @@ async function chooseAudio(file) {
   if (!file) return;
   const oldRecord = await loadAudio().catch(()=>null);
   const oldSessionRecord = currentAudioRecord;
-  const oldAudioState = clone(state.audio);
+  const previousState = clone(state);
   const record = { blob: file, name: file.name };
   setAudioSource(record);
-  state.audio = { name: file.name, saveToDevice: $('saveAudio').checked };
+  const next = clone(previousState);
+  next.audio = { name: file.name, saveToDevice: $('saveAudio').checked };
   try {
-    if (state.audio.saveToDevice) await saveAudio(file);
+    if (next.audio.saveToDevice) await saveAudio(file);
     else await clearAudio();
-    await saveState(state);
+    state = await persistState(next, previousState);
     renderAudioStatus();
     if (state.screen === 'child') renderChild();
   } catch (error) {
     await restoreStoredAudio(oldRecord).catch(()=>{});
     setAudioSource(oldSessionRecord?.blob ? oldSessionRecord : oldRecord);
-    state.audio = oldAudioState;
-    await saveState(state).catch(()=>{});
+    state = previousState;
+    if (await recoverFromConflict(error, 'setup')) return;
     renderAudioStatus();
     $('setupError').textContent = '오디오를 저장하지 못했어요. 저장 공간을 확인한 뒤 다시 시도해 주세요.';
     show($('setupError'), true);
@@ -566,6 +597,7 @@ async function start() {
   try {
     bootTimer = setTimeout(()=>show($('boot'), true),150);
     state = await loadState();
+    await pruneLedgerForEpoch(state.stateEpoch).catch(error => console.warn('이전 학습 기록 정리를 건너뛰었어요.', error));
     let stored = await loadAudio().catch(()=>null);
     if (!stored?.blob && state.audio.name) stored = await copyLegacyAudioIfAvailable(state.audio.name);
     if (stored?.blob) setAudioSource(stored);
@@ -641,17 +673,17 @@ $('setupForm').addEventListener('submit', async event => {
     validateDraft();
     audioController.invalidate();
     draft.stateEpoch = createId('epoch');
-    draft.revision = Number(state.revision) + 1;
     draft.screen = 'child';
-    const previousState = state;
+    const previousState = clone(state);
     const previousStoredAudio = await loadAudio().catch(()=>null);
-    state = clone(draft);
+    const next = clone(draft);
     try {
-      await persistAudioPreference(state.audio.saveToDevice);
-      await saveState(state);
+      await persistAudioPreference(next.audio.saveToDevice);
+      state = await persistState(next, previousState);
     } catch (error) {
       await restoreStoredAudio(previousStoredAudio).catch(()=>{});
       state = previousState;
+      if (await recoverFromConflict(error, 'setup')) return;
       throw error;
     }
     renderCurrentScreen();
@@ -689,9 +721,15 @@ $('rolloverNotice').addEventListener('click', async event => {
 $('backToSetup').addEventListener('click', async event => {
   if (!(await requestSetupAccess(event.currentTarget))) return;
   audioController.invalidate();
-  state.screen = 'setup';
-  await saveState(state);
-  renderCurrentScreen();
+  const previous = clone(state);
+  const next = clone(state);
+  next.screen = 'setup';
+  try {
+    state = await persistState(next, previous);
+    renderCurrentScreen();
+  } catch (error) {
+    if (!(await recoverFromConflict(error, 'child'))) throw error;
+  }
 });
 $('newWeekButton').addEventListener('click', event => confirmNewWeek(event.currentTarget));
 $('exportBackup').addEventListener('click', exportBackup);
